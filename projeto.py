@@ -1,42 +1,49 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from io import BytesIO
 
-st.set_page_config(layout='wide')
-
-def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, valores_normalizados):
+# Função para exportar os dados para um arquivo Excel, incluindo os enunciados
+def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, fig):
     linhas = []
     for item, conteudo in perguntas_hierarquicas.items():
         for subitem, subpergunta in conteudo["subitens"].items():
             linhas.append({"Pergunta": subpergunta, "Resposta": respostas[subitem]})
-    
     df_respostas = pd.DataFrame(linhas)
-    df_grafico = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
-    
+
+    df_grafico = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores[:-1]})
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_respostas.to_excel(writer, index=False, sheet_name='Respostas')
         df_grafico.to_excel(writer, index=False, sheet_name='Gráfico')
-        df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
-    
+
+        workbook = writer.book
+        worksheet = writer.sheets['Gráfico']
+
+        img_data = BytesIO()
+        fig.savefig(img_data, format='png')
+        img_data.seek(0)
+
+        worksheet.insert_image('E2', 'grafico.png', {'image_data': img_data})
+
     return output.getvalue()
 
 if "formulario_preenchido" not in st.session_state:
     st.session_state.formulario_preenchido = False
 
 if not st.session_state.formulario_preenchido:
-    st.title("MATRIZ DE MATURIDADE DE COMPLIANCE E PROCESSOS")
+    st.title("MATRIZ DE MATURIDADE DE COMPLIANCE  E PROCESSOS")
     st.subheader("Por favor, preencha suas informações antes de prosseguir")
-    
+
     nome = st.text_input("Nome")
     email = st.text_input("E-mail")
     empresa = st.text_input("Empresa")
     telefone = st.text_input("Telefone")
-    
+
     if st.button("Prosseguir"):
-        if nome and email and empresa and telefone:
+        if nome and email and empresa and telefone:  # Adicionado 'and' entre 'empresa' e 'telefone'
             st.session_state.nome = nome
             st.session_state.email = email
             st.session_state.empresa = empresa
@@ -46,24 +53,27 @@ if not st.session_state.formulario_preenchido:
         else:
             st.error("Por favor, preencha todos os campos antes de prosseguir.")
 else:
-    st.title("Formulário")
-    
-    caminho_arquivo = "https://github.com/DaniloNs-creator/MATURITY/raw/main/Pasta1.csv"
-    
+    st.title("Formulário com Itens Expansíveis e Gráfico de Radar")
+
+    caminho_arquivo = "/workspaces/MATURITY/FORMULARIO.csv"
     try:
-        perguntas_df = pd.read_csv(caminho_arquivo, error_bad_lines=False)
-        
-        if not {'classe', 'pergunta'}.issubset(perguntas_df.columns):
+        perguntas_df = pd.read_csv(
+            caminho_arquivo, 
+            delimiter=',', 
+            quoting=3, 
+            on_bad_lines='skip'  # Substituído por 'on_bad_lines' para ignorar linhas com problemas
+        )
+
+        if 'classe' not in perguntas_df.columns or 'pergunta' not in perguntas_df.columns:  # Substituído 'ou' por 'or'
             st.error("Certifique-se de que o arquivo CSV contém as colunas 'classe' e 'pergunta'.")
         else:
             perguntas_hierarquicas = {}
-            respostas = st.session_state.get("respostas", {})
-            etapa_atual = st.session_state.get("etapa_atual", 1)
-            
+            respostas = {}
+
             for _, row in perguntas_df.iterrows():
                 classe = str(row['classe'])
                 pergunta = row['pergunta']
-                
+
                 if classe.endswith(".0"):
                     perguntas_hierarquicas[classe] = {"titulo": pergunta, "subitens": {}}
                 else:
@@ -71,117 +81,50 @@ else:
                     if item_principal not in perguntas_hierarquicas:
                         perguntas_hierarquicas[item_principal] = {"titulo": "", "subitens": {}}
                     perguntas_hierarquicas[item_principal]["subitens"][classe] = pergunta
-            
-            total_etapas = len(perguntas_hierarquicas)
-            st.write(f"Etapa {etapa_atual} de {total_etapas}")
-            
-            for i, (item, conteudo) in enumerate(perguntas_hierarquicas.items(), start=1):
-                if i == etapa_atual:
-                    st.subheader(f"{item} - {conteudo['titulo']}")
+
+            st.write("Por favor, responda às perguntas dentro de cada item:")
+            for item, conteudo in perguntas_hierarquicas.items():
+                with st.expander(f"{item} - {conteudo['titulo']}"):
                     for subitem, subpergunta in conteudo["subitens"].items():
-                        respostas[subitem] = st.number_input(
-                            f"{subitem} - {subpergunta}", 
-                            min_value=0, 
-                            max_value=5, 
-                            step=1, 
-                            value=respostas.get(subitem, 0)
-                        )
-                    break
-            
-            st.session_state.respostas = respostas
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Voltar", disabled=(etapa_atual == 1)):
-                    st.session_state.etapa_atual = etapa_atual - 1
-            with col2:
-                if st.button("Prosseguir"):
-                    if etapa_atual < total_etapas:
-                        st.session_state.etapa_atual = etapa_atual + 1
-                    else:
-                        st.session_state.etapa_atual = 1
-                        st.success("Todas as etapas foram concluídas!")
-                        categorias = []
-                        valores = []
-                        valores_normalizados = []
-                        soma_total_respostas = sum(respostas.values())
-                        
-                        for item, conteudo in perguntas_hierarquicas.items():
-                            soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
-                            num_perguntas = len(conteudo["subitens"])
-                            
-                            if num_perguntas > 0:
-                                valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-                                valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
-                                
-                                categorias.append(conteudo["titulo"])
-                                valores.append(valor_percentual)
-                                valores_normalizados.append(valor_normalizado)
-                        
-                        if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
-                            st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
-                        else:
-                            if categorias:
-                                valores_original = valores + valores[:1]
-                                categorias_original = categorias + categorias[:1]
-                                
-                                import plotly.graph_objects as go
-                                
-                                fig_original = go.Figure()
-                                fig_original.add_trace(go.Scatterpolar(
-                                    r=valores_original,
-                                    theta=categorias_original,
-                                    fill='toself',
-                                    name='Gráfico Original'
-                                ))
-                                fig_original.update_layout(
-                                    polar=dict(
-                                        radialaxis=dict(
-                                            visible=True,
-                                            range=[0, 100]
-                                        )),
-                                    showlegend=False
-                                )
-                                
-                                valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
-                                fig_normalizado = go.Figure()
-                                fig_normalizado.add_trace(go.Scatterpolar(
-                                    r=valores_normalizados_fechado,
-                                    theta=categorias_original,
-                                    fill='toself',
-                                    name='Gráfico Normalizado'
-                                ))
-                                fig_normalizado.update_layout(
-                                    polar=dict(
-                                        radialaxis=dict(
-                                            visible=True,
-                                            range=[0, 100]
-                                        )),
-                                    showlegend=False
-                                )
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.plotly_chart(fig_original, use_container_width=True)
-                                    st.write("### Tabela 1")
-                                    df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-                                    st.dataframe(df_grafico_original)
-                                
-                                with col2:
-                                    st.plotly_chart(fig_normalizado, use_container_width=True)
-                                    st.write("### Tabela 2")
-                                    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
-                                    st.dataframe(df_grafico_normalizado)
-                                
-                                excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
-                                st.download_button(
-                                    label="Exportar para Excel",
-                                    data=excel_data,
-                                    file_name="respostas_e_grafico.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                )
+                        respostas[subitem] = st.number_input(f"{subitem} - {subpergunta}", min_value=0, max_value=5, step=1)
+
+            if st.button("Enviar Dados e Gerar Gráfico"):
+                st.write(f"Obrigado, {st.session_state.nome}!")
+                st.write("Respostas enviadas com sucesso!")
+
+                categorias = []
+                valores = []
+                for item, conteudo in perguntas_hierarquicas.items():
+                    soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
+                    num_perguntas = len(conteudo["subitens"])
+                    if num_perguntas > 0:
+                        valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+                        categorias.append(conteudo["titulo"])
+                        valores.append(valor_percentual)
+
+                if categorias:
+                    valores += valores[:1]
+                    angulos = np.linspace(0, 2 * np.pi, len(categorias), endpoint=False).tolist()
+                    angulos += angulos[:1]
+
+                    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
+                    ax.fill(angulos, valores, color='blue', alpha=0.25)
+                    ax.plot(angulos, valores, color='blue', linewidth=2)
+                    ax.set_yticks(np.arange(0, 101, step=20))
+                    ax.set_xticks(angulos[:-1])
+                    ax.set_xticklabels(categorias, fontsize=8)
+
+                    st.pyplot(fig)
+
+                    excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, fig)
+                    st.download_button(
+                        label="Exportar para Excel",
+                        data=excel_data,
+                        file_name="respostas_e_grafico.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+    except FileNotFoundError:
+        st.error(f"O arquivo {caminho_arquivo} não foi encontrado.")
     except pd.errors.ParserError as e:
-        st.error(f"Erro ao analisar o arquivo CSV: {e}")
-    except Exception as e:
-        st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
+        st.error(f"Erro ao ler o arquivo CSV: {e}")
