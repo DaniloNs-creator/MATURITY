@@ -48,10 +48,10 @@ if not st.session_state.formulario_preenchido:
 else:
     st.title("Formulário")
     
-    caminho_arquivo = "https://github.com/DaniloNs-creator/MATURITY/blob/main/Pasta1.csv"
+    caminho_arquivo = "https://github.com/DaniloNs-creator/MATURITY/raw/main/Pasta1.csv"
     
     try:
-        perguntas_df = pd.read_csv(caminho_arquivo)
+        perguntas_df = pd.read_csv(caminho_arquivo, error_bad_lines=False)
         
         if not {'classe', 'pergunta'}.issubset(perguntas_df.columns):
             st.error("Certifique-se de que o arquivo CSV contém as colunas 'classe' e 'pergunta'.")
@@ -181,5 +181,7 @@ else:
                                     file_name="respostas_e_grafico.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 )
+    except pd.errors.ParserError as e:
+        st.error(f"Erro ao analisar o arquivo CSV: {e}")
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
