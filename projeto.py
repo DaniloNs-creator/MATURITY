@@ -55,7 +55,7 @@ if not st.session_state.formulario_preenchido:
 else:
     st.title("Formulário com Itens Expansíveis e Gráfico de Radar")
 
-    caminho_arquivo = "/workspaces/MATURITY/FORMULARIO.csv"
+    caminho_arquivo = "https://github.com/DaniloNs-creator/MATURITY/blob/main/FORMULARIO.csv"
     try:
         perguntas_df = pd.read_csv(
             caminho_arquivo, 
