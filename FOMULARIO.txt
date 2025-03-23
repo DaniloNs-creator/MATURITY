@@ -1,36 +1,3 @@
-hierarquia
-1
-1.1
-2
-2.1
-2.2
-2.3
-2.4
-2.5
-2.6
-2.7
-3
-3.1
-3.2
-3.3
-3.4
-3.5
-3.6
-4
-4.1
-4.2
-4.3
-5
-5.1
-5.2
-6
-6.1
-6.2
-6.3
-6.4
-6.5
-6.6
-6.7
 classe;pergunta
 1;Eficiência de Gestão
 1.1;Numa escala de 01 a 5 informe se você possui todos os indicadores gerenciais para a perspectiva que sua empresa precisa ter e se a gestão são orientadas e medidas por estes indicadores, com metas definidas e claras e com cobrança de resultados?
