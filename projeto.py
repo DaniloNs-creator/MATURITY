@@ -47,7 +47,7 @@ if not st.session_state.formulario_preenchido:
         else:
             st.error("Por favor, preencha todos os campos antes de prosseguir.")
 else:
-    caminho_arquivo = "https://github.com/DaniloNs-creator/projeto01/raw/main/Pasta1.csv"
+    caminho_arquivo = "https://github.com/DaniloNs-creator/projeto01/raw/main/FORMULARIO.csv"
     try:
         perguntas_df = pd.read_csv(caminho_arquivo)
         if not {'classe', 'pergunta'}.issubset(perguntas_df.columns):
