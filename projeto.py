@@ -28,11 +28,32 @@ def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, 
         df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
     return output.getvalue()
 
+# Mapeamento de respostas textuais para valores numéricos
+respostas_textuais = {
+    "Selecione": 0,  # Valor padrão inicial
+    "NÃO INICIADO": 1,
+    "INICIAL": 2,
+    "EM DESENVOLVIMENTO": 3,
+    "AVANÇADO": 4,
+    "COMPLETAMENTE IMPLEMENTADO": 5
+}
+
+# Função para converter valor numérico em texto
+def valor_para_texto(valor):
+    for texto, numero in respostas_textuais.items():
+        if numero == valor:
+            return texto
+    return "NÃO INICIADO"
+
+# Função para converter texto em valor numérico
+def texto_para_valor(texto):
+    return respostas_textuais.get(texto, 1)
+
 if "formulario_preenchido" not in st.session_state:
     st.session_state.formulario_preenchido = False
 if "grupo_atual" not in st.session_state:
     st.session_state.grupo_atual = 0
-if "respostas" not in st.session_state:
+if "respostas" not in st.session_state or st.session_state.respostas:  # Garante que as respostas estejam vazias
     st.session_state.respostas = {}
 
 if not st.session_state.formulario_preenchido:
@@ -106,35 +127,38 @@ else:
                 st.write(f"### {perguntas_hierarquicas[grupo]['titulo']}")
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
                     if subitem not in st.session_state.respostas:
-                        st.session_state.respostas[subitem] = 0
-                    st.session_state.respostas[subitem] = st.number_input(
+                        st.session_state.respostas[subitem] = 0  # Valor padrão "Selecione"
+                    resposta_atual_texto = valor_para_texto(st.session_state.respostas[subitem])
+                    resposta_selecionada = st.selectbox(
                         f"{subitem} - {subpergunta}",
-                        min_value=0,
-                        max_value=5,
-                        step=1,
-                        value=st.session_state.respostas[subitem]
+                        options=list(respostas_textuais.keys()),
+                        index=list(respostas_textuais.keys()).index(resposta_atual_texto)
                     )
+                    st.session_state.respostas[subitem] = texto_para_valor(resposta_selecionada)
 
-                # Verifica se o botão "Prosseguir" foi clicado
+                # Verifica se todas as perguntas foram respondidas antes de prosseguir
                 if st.button("Prosseguir"):
-                    # Verifica se o grupo atual é "1 - Eficiência de Gestão"
-                    if grupo == "1 - Eficiência de Gestão":
-                        valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
-                        if valor_percentual_grupo1 < 25:
-                            st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
-                        else:
-                            st.session_state.grupo_atual += 1
-                    elif grupo == "2 - Estruturas":  # Substitua pelo nome real do Grupo 2
-                        valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, st.session_state.respostas)
-                        valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
-                        soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
-
-                        if soma_percentual <= 50:
-                            st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
-                        else:
-                            st.session_state.grupo_atual += 1
+                    if 0 in st.session_state.respostas.values():
+                        st.error("Por favor, responda todas as perguntas antes de prosseguir.")
                     else:
-                        st.session_state.grupo_atual += 1
+                        # Verifica se o grupo atual é "1 - Eficiência de Gestão"
+                        if grupo == "1 - Eficiência de Gestão":
+                            valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
+                            if valor_percentual_grupo1 < 25:
+                                st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
+                            else:
+                                st.session_state.grupo_atual += 1
+                        elif grupo == "2 - Estruturas":  # Substitua pelo nome real do Grupo 2
+                            valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, st.session_state.respostas)
+                            valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
+                            soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
+
+                            if soma_percentual <= 50:
+                                st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
+                            else:
+                                st.session_state.grupo_atual += 1
+                        else:
+                            st.session_state.grupo_atual += 1
             else:
                 st.write("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico"):
