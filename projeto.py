@@ -2,9 +2,18 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from io import BytesIO
-import requests  # Adicionado para baixar o arquivo remoto
+import requests
 
 st.set_page_config(layout='wide')
+
+# Mapeamento das respostas de texto para valores numéricos
+mapeamento_respostas = {
+    "Não iniciado": 1,
+    "Inicial": 2,
+    "Em andamento": 3,
+    "Avançado": 4,
+    "Completamente implementado": 5
+}
 
 def calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, respostas):
     soma_respostas = sum(respostas[subitem] for subitem in perguntas_hierarquicas[grupo]["subitens"].keys())
@@ -28,32 +37,11 @@ def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, 
         df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
     return output.getvalue()
 
-# Mapeamento de respostas textuais para valores numéricos
-respostas_textuais = {
-    "Selecione": 0,  # Valor padrão inicial
-    "NÃO INICIADO": 1,
-    "INICIAL": 2,
-    "EM DESENVOLVIMENTO": 3,
-    "AVANÇADO": 4,
-    "COMPLETAMENTE IMPLEMENTADO": 5
-}
-
-# Função para converter valor numérico em texto
-def valor_para_texto(valor):
-    for texto, numero in respostas_textuais.items():
-        if numero == valor:
-            return texto
-    return "NÃO INICIADO"
-
-# Função para converter texto em valor numérico
-def texto_para_valor(texto):
-    return respostas_textuais.get(texto, 1)
-
 if "formulario_preenchido" not in st.session_state:
     st.session_state.formulario_preenchido = False
 if "grupo_atual" not in st.session_state:
     st.session_state.grupo_atual = 0
-if "respostas" not in st.session_state or st.session_state.respostas:  # Garante que as respostas estejam vazias
+if "respostas" not in st.session_state:
     st.session_state.respostas = {}
 
 if not st.session_state.formulario_preenchido:
@@ -65,7 +53,7 @@ if not st.session_state.formulario_preenchido:
     empresa = st.text_input("Empresa")
     telefone = st.text_input("Telefone")
     if st.button("Prosseguir"):
-        if nome and email and empresa and telefone:  # Corrigido: Adicionado 'and' entre 'empresa' e 'telefone'
+        if nome and email and empresa and telefone:
             st.session_state.nome = nome
             st.session_state.email = email
             st.session_state.empresa = empresa
@@ -75,38 +63,31 @@ if not st.session_state.formulario_preenchido:
         else:
             st.error("Por favor, preencha todos os campos antes de prosseguir.")
 else:
-    url_arquivo = "https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/FOMULARIO.txt"  # URL raw do GitHub
+    url_arquivo = "https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/FOMULARIO.txt"
     try:
-        # Baixando o arquivo .txt
         response = requests.get(url_arquivo)
-        response.raise_for_status()  # Verifica se a requisição foi bem-sucedida
+        response.raise_for_status()
 
-        # Processando as linhas para criar um DataFrame
         lines = response.text.splitlines()
         data = []
         grupo_atual = None
         for line in lines:
-            # Separa as colunas usando o delimitador ";"
             parts = line.strip().split(';')
-            if len(parts) >= 2:  # Verifica se há pelo menos duas colunas
+            if len(parts) >= 2:
                 classe = parts[0].strip()
                 pergunta = parts[1].strip()
 
-                # Verifica se a linha é um título de grupo (número inteiro seguido de um texto)
                 if classe.isdigit():
-                    grupo_atual = f"{classe} - {pergunta}"  # Formato: "1 - Eficiência de Gestão"
+                    grupo_atual = f"{classe} - {pergunta}"
                 else:
-                    # Adiciona a pergunta ao grupo atual
                     if grupo_atual:
                         data.append({'grupo': grupo_atual, 'classe': classe, 'pergunta': pergunta})
 
-        # Criar o DataFrame
         perguntas_df = pd.DataFrame(data)
 
-        # Verificar se as colunas necessárias estão presentes
         if perguntas_df.empty or not {'grupo', 'classe', 'pergunta'}.issubset(perguntas_df.columns):
             st.error("Certifique-se de que o arquivo TXT contém as colunas 'grupo', 'classe' e 'pergunta'.")
-            st.write("Conteúdo do arquivo processado:", perguntas_df.head())  # Exibe uma amostra para depuração
+            st.write("Conteúdo do arquivo processado:", perguntas_df.head())
         else:
             perguntas_hierarquicas = {}
             for _, row in perguntas_df.iterrows():
@@ -127,42 +108,36 @@ else:
                 st.write(f"### {perguntas_hierarquicas[grupo]['titulo']}")
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
                     if subitem not in st.session_state.respostas:
-                        st.session_state.respostas[subitem] = 0  # Valor padrão "Selecione"
-                    resposta_atual_texto = valor_para_texto(st.session_state.respostas[subitem])
-                    resposta_selecionada = st.selectbox(
+                        st.session_state.respostas[subitem] = "Não iniciado"
+                    resposta = st.selectbox(
                         f"{subitem} - {subpergunta}",
-                        options=list(respostas_textuais.keys()),
-                        index=list(respostas_textuais.keys()).index(resposta_atual_texto)
-                    )
-                    st.session_state.respostas[subitem] = texto_para_valor(resposta_selecionada)
+                        options=list(mapeamento_respostas.keys()),
+                        index=list(mapeamento_respostas.keys()).index(st.session_state.respostas[subitem])
+                    )  # Fechamento do parêntese corrigido
+                    st.session_state.respostas[subitem] = resposta
 
-                # Verifica se todas as perguntas foram respondidas antes de prosseguir
                 if st.button("Prosseguir"):
-                    if 0 in st.session_state.respostas.values():
-                        st.error("Por favor, responda todas as perguntas antes de prosseguir.")
-                    else:
-                        # Verifica se o grupo atual é "1 - Eficiência de Gestão"
-                        if grupo == "1 - Eficiência de Gestão":
-                            valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
-                            if valor_percentual_grupo1 < 25:
-                                st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
-                            else:
-                                st.session_state.grupo_atual += 1
-                        elif grupo == "2 - Estruturas":  # Substitua pelo nome real do Grupo 2
-                            valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, st.session_state.respostas)
-                            valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
-                            soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
-
-                            if soma_percentual <= 50:
-                                st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
-                            else:
-                                st.session_state.grupo_atual += 1
+                    if grupo == "1 - Eficiência de Gestão":
+                        valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                        if valor_percentual_grupo1 < 25:
+                            st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
                         else:
                             st.session_state.grupo_atual += 1
+                    elif grupo == "2 - Estruturas":
+                        valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                        valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                        soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
+
+                        if soma_percentual <= 50:
+                            st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
+                        else:
+                            st.session_state.grupo_atual += 1
+                    else:
+                        st.session_state.grupo_atual += 1
             else:
                 st.write("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico"):
-                    respostas = st.session_state.respostas
+                    respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
                     categorias = []
                     valores = []
                     valores_normalizados = []
@@ -220,10 +195,9 @@ else:
                                 st.write("### Gráfico 1")
                                 df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
                                 total_porcentagem = df_grafico_original['Porcentagem'].sum()
-                                df_grafico_original.loc['Total'] = ['Total', total_porcentagem]  # Adiciona a linha de total
+                                df_grafico_original.loc['Total'] = ['Total', total_porcentagem]
                                 st.dataframe(df_grafico_original)
 
-                                # Exibe mensagem baseada no total da coluna "Porcentagem"
                                 if total_porcentagem < 26:
                                     st.warning("SEU NIVEL É INICIAL")
                                 elif total_porcentagem < 51:
@@ -239,7 +213,7 @@ else:
                                 st.write("### Gráfico 2")
                                 df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
                                 st.dataframe(df_grafico_normalizado)
-                            excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
+                            excel_data = exportar_para_excel_completo(st.session_state.respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
                             st.download_button(
                                 label="Exportar para Excel",
                                 data=excel_data,
