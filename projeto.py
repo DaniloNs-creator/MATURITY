@@ -195,7 +195,21 @@ else:
                                 st.plotly_chart(fig_original, use_container_width=True)
                                 st.write("### Gráfico 1")
                                 df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
+                                total_porcentagem = df_grafico_original['Porcentagem'].sum()
+                                df_grafico_original.loc['Total'] = ['Total', total_porcentagem]  # Adiciona a linha de total
                                 st.dataframe(df_grafico_original)
+
+                                # Exibe mensagem baseada no total da coluna "Porcentagem"
+                                if total_porcentagem < 26:
+                                    st.warning("SEU NIVEL É INICIAL")
+                                elif total_porcentagem < 51:
+                                    st.warning("SEU NIVEL É REPETITIVO")
+                                elif total_porcentagem < 71:
+                                    st.warning("SEU NIVEL É DEFINIDO")
+                                elif total_porcentagem < 90:
+                                    st.warning("SEU NIVEL É GERENCIADO")
+                                elif total_porcentagem >= 91:
+                                    st.success("SEU NIVEL É OTIMIZADO")
                             with col2:
                                 st.plotly_chart(fig_normalizado, use_container_width=True)
                                 st.write("### Gráfico 2")
