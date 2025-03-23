@@ -6,6 +6,12 @@ import requests  # Adicionado para baixar o arquivo remoto
 
 st.set_page_config(layout='wide')
 
+def calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, respostas):
+    soma_respostas = sum(respostas[subitem] for subitem in perguntas_hierarquicas[grupo]["subitens"].keys())
+    num_perguntas = len(perguntas_hierarquicas[grupo]["subitens"])
+    valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+    return valor_percentual
+
 def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, valores_normalizados):
     linhas = []
     for item, conteudo in perguntas_hierarquicas.items():
@@ -108,8 +114,27 @@ else:
                         step=1,
                         value=st.session_state.respostas[subitem]
                     )
+
+                # Verifica se o botão "Prosseguir" foi clicado
                 if st.button("Prosseguir"):
-                    st.session_state.grupo_atual += 1
+                    # Verifica se o grupo atual é "1 - Eficiência de Gestão"
+                    if grupo == "1 - Eficiência de Gestão":
+                        valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
+                        if valor_percentual_grupo1 < 25:
+                            st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
+                        else:
+                            st.session_state.grupo_atual += 1
+                    elif grupo == "2 - Estruturas":  # Substitua pelo nome real do Grupo 2
+                        valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, st.session_state.respostas)
+                        valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, st.session_state.respostas)
+                        soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
+
+                        if soma_percentual <= 50:
+                            st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
+                        else:
+                            st.session_state.grupo_atual += 1
+                    else:
+                        st.session_state.grupo_atual += 1
             else:
                 st.write("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico"):
