@@ -8,6 +8,7 @@ st.set_page_config(layout='wide')
 
 # Mapeamento das respostas de texto para valores numéricos
 mapeamento_respostas = {
+    "Selecione": 0,  # Adicionando "Selecione" como valor padrão
     "Não iniciado": 1,
     "Inicial": 2,
     "Em andamento": 3,
@@ -37,12 +38,20 @@ def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, 
         df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
     return output.getvalue()
 
+# Inicialização do estado da sessão
 if "formulario_preenchido" not in st.session_state:
     st.session_state.formulario_preenchido = False
 if "grupo_atual" not in st.session_state:
     st.session_state.grupo_atual = 0
 if "respostas" not in st.session_state:
     st.session_state.respostas = {}
+
+# Função para reiniciar o estado
+def reiniciar_estado():
+    st.session_state.formulario_preenchido = False
+    st.session_state.grupo_atual = 0
+    st.session_state.respostas = {}
+    st.experimental_rerun()  # Força a recarga da página
 
 if not st.session_state.formulario_preenchido:
     st.title("MATRIZ DE MATURIDADE DE COMPLIANCE E PROCESSOS")
@@ -108,12 +117,12 @@ else:
                 st.write(f"### {perguntas_hierarquicas[grupo]['titulo']}")
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
                     if subitem not in st.session_state.respostas:
-                        st.session_state.respostas[subitem] = "Não iniciado"
+                        st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
                     resposta = st.selectbox(
                         f"{subitem} - {subpergunta}",
                         options=list(mapeamento_respostas.keys()),
                         index=list(mapeamento_respostas.keys()).index(st.session_state.respostas[subitem])
-                    )  # Fechamento do parêntese corrigido
+                    )
                     st.session_state.respostas[subitem] = resposta
 
                 if st.button("Prosseguir"):
@@ -123,6 +132,7 @@ else:
                             st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
                         else:
                             st.session_state.grupo_atual += 1
+                            reiniciar_estado()  # Reinicia o estado e recarrega a página
                     elif grupo == "2 - Estruturas":
                         valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
                         valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
@@ -132,8 +142,10 @@ else:
                             st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
                         else:
                             st.session_state.grupo_atual += 1
+                            reiniciar_estado()  # Reinicia o estado e recarrega a página
                     else:
                         st.session_state.grupo_atual += 1
+                        reiniciar_estado()  # Reinicia o estado e recarrega a página
             else:
                 st.write("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico"):
