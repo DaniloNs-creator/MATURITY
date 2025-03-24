@@ -217,11 +217,6 @@ else:
                     st.session_state.respostas[subitem] = resposta
 
                 col1, col2 = st.columns([1, 1])  # Criar colunas para posicionar os botões
-                with col1:
-                    if st.button("Voltar"):
-                        if st.session_state.grupo_atual > 0:
-                            st.session_state.grupo_atual -= 1
-
                 with col2:
                     if st.button("Prosseguir"):
                         if grupo == "1 - Eficiência de Gestão":
@@ -327,7 +322,6 @@ else:
                                 st.write("### Nível de Maturidade")
                                 if total_porcentagem < 26:
                                     st.error("NÍVEL INICIAL")
-                                    st.warning("Processos ad hoc e não padronizados")
                                 elif total_porcentagem < 51:
                                     st.warning("NÍVEL REPETITIVO")
                                     st.info("Processos básicos estabelecidos")
@@ -346,7 +340,6 @@ else:
                                 st.write("### Resultados Normalizados")
                                 df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
                                 st.dataframe(df_grafico_normalizado)
-                                st.info("Os valores normalizados ajudam a comparar o desempenho relativo entre diferentes categorias.")
                             
                             # Botão de exportação
                             excel_data = exportar_para_excel_completo(
