@@ -174,71 +174,35 @@ else:
             if grupo_atual < len(grupos):
                 grupo = grupos[grupo_atual]
                 
-                # Adiciona o texto específico para o Grupo 1
-                if grupo == "1 - Eficiência de Gestão":
+                # Exibe o texto introdutório correspondente ao grupo atual
+                if grupo.startswith("1 -"):
                     st.markdown(TEXTO_GRUPO1)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 2
-                if grupo == "2 - Estruturas":
+                elif grupo.startswith("2 -"):
                     st.markdown(TEXTO_GRUPO2)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 3
-                if grupo == "3 - Compliance":
+                elif grupo.startswith("3 -"):
                     st.markdown(TEXTO_GRUPO3)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 4
-                if grupo == "4 - Gestão de Riscos":
+                elif grupo.startswith("4 -"):
                     st.markdown(TEXTO_GRUPO4)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 5
-                if grupo.startswith("5 -"):  # Garantir que o grupo 5 seja identificado corretamente
+                elif grupo.startswith("5 -"):
                     st.markdown(TEXTO_GRUPO5)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 6
-                if grupo.startswith("6 -"):
+                elif grupo.startswith("6 -"):
                     st.markdown(TEXTO_GRUPO6)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 7
-                if grupo.startswith("7 -"):
+                elif grupo.startswith("7 -"):
                     st.markdown(TEXTO_GRUPO7)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 8
-                if grupo.startswith("8 -"):
+                elif grupo.startswith("8 -"):
                     st.markdown(TEXTO_GRUPO8)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 9
-                if grupo.startswith("9 -"):
+                elif grupo.startswith("9 -"):
                     st.markdown(TEXTO_GRUPO9)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 10
-                if grupo.startswith("10 -"):
+                elif grupo.startswith("10 -"):
                     st.markdown(TEXTO_GRUPO10)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 11
-                if grupo.startswith("11 -"):
+                elif grupo.startswith("11 -"):
                     st.markdown(TEXTO_GRUPO11)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 12
-                if grupo.startswith("12 -"):
+                elif grupo.startswith("12 -"):
                     st.markdown(TEXTO_GRUPO12)
-                    st.markdown("---")  # Linha divisória
-                
-                # Adiciona o texto específico para o Grupo 13
-                if grupo.startswith("13 -"):
+                elif grupo.startswith("13 -"):
                     st.markdown(TEXTO_GRUPO13)
-                    st.markdown("---")  # Linha divisória
                 
+                st.markdown("---")  # Linha divisória
                 st.write(f"### {perguntas_hierarquicas[grupo]['titulo']}")
                 
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
@@ -252,30 +216,37 @@ else:
                     )
                     st.session_state.respostas[subitem] = resposta
 
-                if st.button("Prosseguir"):
-                    if grupo == "1 - Eficiência de Gestão":
-                        valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, 
-                            {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                        
-                        if valor_percentual_grupo1 < 25:
-                            st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25%.")
-                            st.warning("Recomendamos melhorias na eficiência de gestão antes de continuar.")
-                        else:
-                            st.session_state.grupo_atual += 1
-                    elif grupo == "2 - Estruturas":
-                        valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, 
-                            {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                        valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, 
-                            {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                        soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
+                col1, col2 = st.columns([1, 1])  # Criar colunas para posicionar os botões
+                with col1:
+                    if st.button("Voltar"):
+                        if st.session_state.grupo_atual > 0:
+                            st.session_state.grupo_atual -= 1
 
-                        if soma_percentual <= 50:
-                            st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50%.")
-                            st.warning("É necessário melhorar os processos básicos antes de avançar.")
+                with col2:
+                    if st.button("Prosseguir"):
+                        if grupo == "1 - Eficiência de Gestão":
+                            valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, 
+                                {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                            
+                            if valor_percentual_grupo1 < 25:
+                                st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25%.")
+                                st.warning("Recomendamos melhorias na eficiência de gestão antes de continuar.")
+                            else:
+                                st.session_state.grupo_atual += 1
+                        elif grupo == "2 - Estruturas":
+                            valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, 
+                                {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                            valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, 
+                                {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                            soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
+
+                            if soma_percentual <= 50:
+                                st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50%.")
+                                st.warning("É necessário melhorar os processos básicos antes de avançar.")
+                            else:
+                                st.session_state.grupo_atual += 1
                         else:
                             st.session_state.grupo_atual += 1
-                    else:
-                        st.session_state.grupo_atual += 1
             else:
                 st.success("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico"):
