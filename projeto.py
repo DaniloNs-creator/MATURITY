@@ -190,77 +190,83 @@ else:
                     if resposta == "Selecione":
                         todas_respostas_preenchidas = False  # Marca como incompleto se alguma resposta for "Selecione"
 
-                if st.button("Prosseguir"):
-                    if not todas_respostas_preenchidas:
-                        st.error("Por favor, responda todas as perguntas antes de prosseguir.")
-                    else:
-                        if grupo == "1 - Eficiência de Gestão":
-                            valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                            if valor_percentual_grupo1 < 25:
-                                st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
-                            else:
-                                st.session_state.grupo_atual += 1
-                        elif grupo == "2 - Estruturas":
-                            valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                            valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                            soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
-
-                            if soma_percentual <= 50:
-                                st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
-                            else:
-                                st.session_state.grupo_atual += 1
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Voltar"):
+                        if st.session_state.grupo_atual > 0:
+                            st.session_state.grupo_atual -= 1
+                with col2:
+                    if st.button("Prosseguir"):
+                        if not todas_respostas_preenchidas:
+                            st.error("Por favor, responda todas as perguntas antes de prosseguir.")
                         else:
-                            st.session_state.grupo_atual += 1
+                            if grupo == "1 - Eficiência de Gestão":
+                                valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                                if valor_percentual_grupo1 < 25:
+                                    st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
+                                else:
+                                    st.session_state.grupo_atual += 1
+                            elif grupo == "2 - Estruturas":
+                                valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                                valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                                soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
 
-                        # Exibe o nível do usuário após preencher o grupo atual
-                        respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
-                        total_respostas = sum(respostas.values())
-                        total_perguntas = len(respostas)
-                        if total_perguntas > 0:
-                            nivel_percentual = (total_respostas / (total_perguntas * 5)) * 100
-                            if nivel_percentual < 26:
-                                st.warning("SEU NÍVEL ATUAL É: INICIAL")
-                                st.info("""
-                                **NIVEL DE MATURIDADE INICIAL:** 
-                                Neste estágio, a organização opera de forma desestruturada, sem processos claramente definidos ou formalizados. 
-                                As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada. 
-                                A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
-                                """)
-                            elif nivel_percentual < 51:
-                                st.warning("SEU NÍVEL ATUAL É: REPETITIVO")
-                                st.info("""
-                                **NIVEL DE MATURIDADE ORGANIZAÇÃO:** 
-                                A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada. 
-                                Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência na execução continue limitada. 
-                                As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
-                                """)
-                            elif nivel_percentual < 71:
-                                st.warning("SEU NÍVEL ATUAL É: DEFINIDO")
-                                st.info("""
-                                **NIVEL DE MATURIDADE CONSOLIDAÇÃO:** 
-                                A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada. 
-                                Existe uma clareza maior sobre as responsabilidades e papéis, o que reduz a dependência do conhecimento individual. 
-                                A implementação de controles internos começa a ganhar robustez, permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas. 
-                                Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
-                                """)
-                            elif nivel_percentual < 90:
-                                st.warning("SEU NÍVEL ATUAL É: GERENCIADO")
-                                st.info("""
-                                **NIVEL DE MATURIDADE OTIMIZAÇÃO:** 
-                                Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho. 
-                                A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades. 
-                                A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional. 
-                                O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
-                                """)
-                            elif nivel_percentual >= 91:
-                                st.success("SEU NÍVEL ATUAL É: OTIMIZADO")
-                                st.info("""
-                                **NIVEL DE MATURIDADE EXCELÊNCIA:** 
-                                A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação. 
-                                Os processos são constantemente avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico. 
-                                Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório. 
-                                O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
-                                """)
+                                if soma_percentual <= 50:
+                                    st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
+                                else:
+                                    st.session_state.grupo_atual += 1
+                            else:
+                                st.session_state.grupo_atual += 1
+
+                            # Exibe o nível do usuário após preencher o grupo atual
+                            respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
+                            total_respostas = sum(respostas.values())
+                            total_perguntas = len(respostas)
+                            if total_perguntas > 0:
+                                nivel_percentual = (total_respostas / (total_perguntas * 5)) * 100
+                                if nivel_percentual < 26:
+                                    st.warning("SEU NÍVEL ATUAL É: INICIAL")
+                                    st.info("""
+                                    **NIVEL DE MATURIDADE INICIAL:** 
+                                    Neste estágio, a organização opera de forma desestruturada, sem processos claramente definidos ou formalizados. 
+                                    As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada. 
+                                    A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
+                                    """)
+                                elif nivel_percentual < 51:
+                                    st.warning("SEU NÍVEL ATUAL É: REPETITIVO")
+                                    st.info("""
+                                    **NIVEL DE MATURIDADE ORGANIZAÇÃO:** 
+                                    A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada. 
+                                    Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência na execução continue limitada. 
+                                    As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
+                                    """)
+                                elif nivel_percentual < 71:
+                                    st.warning("SEU NÍVEL ATUAL É: DEFINIDO")
+                                    st.info("""
+                                    **NIVEL DE MATURIDADE CONSOLIDAÇÃO:** 
+                                    A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada. 
+                                    Existe uma clareza maior sobre as responsabilidades e papéis, o que reduz a dependência do conhecimento individual. 
+                                    A implementação de controles internos começa a ganhar robustez, permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas. 
+                                    Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
+                                    """)
+                                elif nivel_percentual < 90:
+                                    st.warning("SEU NÍVEL ATUAL É: GERENCIADO")
+                                    st.info("""
+                                    **NIVEL DE MATURIDADE OTIMIZAÇÃO:** 
+                                    Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho. 
+                                    A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades. 
+                                    A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional. 
+                                    O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
+                                    """)
+                                elif nivel_percentual >= 91:
+                                    st.success("SEU NÍVEL ATUAL É: OTIMIZADO")
+                                    st.info("""
+                                    **NIVEL DE MATURIDADE EXCELÊNCIA:** 
+                                    A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação. 
+                                    Os processos são constantemente avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico. 
+                                    Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório. 
+                                    O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
+                                    """)
             else:
                 st.write("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico"):
