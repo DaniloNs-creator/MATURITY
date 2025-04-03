@@ -54,7 +54,7 @@ if not st.session_state.formulario_preenchido:
     empresa = st.text_input("Empresa")
     telefone = st.text_input("Telefone")
     if st.button("Prosseguir"):
-        if nome and email and empresa and telefone:  # Corrigido o erro de sintaxe
+        if nome and email and empresa and telefone:  # Corrigido: adicionando "and" entre "empresa" e "telefone"
             st.session_state.nome = nome
             st.session_state.email = email
             st.session_state.empresa = empresa
@@ -102,6 +102,46 @@ else:
                 perguntas_hierarquicas[grupo]["subitens"][classe] = pergunta
 
             grupos = list(perguntas_hierarquicas.keys())
+            
+            # Criando navegação por grupos
+            with st.sidebar:
+                st.title("Navegação por Grupos")
+                tab1, tab2, tab3, tab4 = st.tabs(["FINANCEIRA", "GESTÃO", "GOVERNANÇA", "SETORES"])
+                
+                with tab1:
+                    if st.button("Eficiência de Gestão"):
+                        st.session_state.grupo_atual = 0
+                
+                with tab2:
+                    if st.button("Estruturas"):
+                        st.session_state.grupo_atual = 1
+                
+                with tab3:
+                    if st.button("Gestão de Processos"):
+                        st.session_state.grupo_atual = 2
+                    if st.button("Gestão de Riscos"):
+                        st.session_state.grupo_atual = 3
+                    if st.button("Compliance"):
+                        st.session_state.grupo_atual = 4
+                    if st.button("Canal de Denúncias"):
+                        st.session_state.grupo_atual = 5
+                    if st.button("Governança Corporativa"):
+                        st.session_state.grupo_atual = 6
+                
+                with tab4:
+                    if st.button("Recursos Humanos"):
+                        st.session_state.grupo_atual = 7
+                    if st.button("Tecnologia da Informação"):
+                        st.session_state.grupo_atual = 8
+                    if st.button("Compras"):
+                        st.session_state.grupo_atual = 9
+                    if st.button("Estoques"):
+                        st.session_state.grupo_atual = 10
+                    if st.button("Contabilidade e Controle Financeiro"):
+                        st.session_state.grupo_atual = 11
+                    if st.button("Logística e Distribuição"):
+                        st.session_state.grupo_atual = 12
+
             grupo_atual = st.session_state.grupo_atual
 
             # Textos introdutórios para cada grupo
@@ -145,6 +185,14 @@ else:
             Esta seção avalia a transparência e conformidade da contabilidade empresarial. Um controle rigoroso das demonstrações financeiras assegura a correta apuração de resultados, garantindo confiança e credibilidade junto a investidores e órgãos reguladores.
             """
 
+            # Lista de perguntas obrigatórias
+            perguntas_obrigatorias = [
+                "1.02", "1.06", "1.42", "1.03", "1.13", "1.14", "1.30", "1.12", "1.19", "1.25", "1.41", "1.43", "1.27", "1.35", "1.45", "1.20",
+                "2.10", "2.01", "2.16", "2.23", "2.05", "2.08", "2.25", "2.29", "2.21", "2.22",
+                "3.01", "3.04", "3.08", "3.11", "3.29", "3.38", "3.40", "3.42", "3.43",
+                "5.01", "5.03", "5.04", "5.07", "5.10", "5.32", "5.35", "5.40"
+            ]
+
             if grupo_atual < len(grupos):
                 grupo = grupos[grupo_atual]
 
@@ -181,8 +229,15 @@ else:
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
                     if subitem not in st.session_state.respostas:
                         st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
+
+                    # Adiciona destaque em negrito para perguntas obrigatórias
+                    if subitem in perguntas_obrigatorias:
+                        pergunta_label = f"**{subitem} - {subpergunta}**"  # Destaca em negrito
+                    else:
+                        pergunta_label = f"{subitem} - {subpergunta}"
+
                     resposta = st.selectbox(
-                        f"{subitem} - {subpergunta}",
+                        pergunta_label,
                         options=list(mapeamento_respostas.keys()),
                         index=list(mapeamento_respostas.keys()).index(st.session_state.respostas[subitem])
                     )
@@ -197,26 +252,24 @@ else:
                             st.session_state.grupo_atual -= 1
                 with col2:
                     if st.button("Prosseguir"):
-                        if not todas_respostas_preenchidas:
-                            st.error("Por favor, responda todas as perguntas antes de prosseguir.")
-                        else:
-                            if grupo == "1 - Eficiência de Gestão":
-                                valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                                if valor_percentual_grupo1 < 25:
-                                    st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
-                                else:
-                                    st.session_state.grupo_atual += 1
-                            elif grupo == "2 - Estruturas":
-                                valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                                valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                                soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
-
-                                if soma_percentual <= 50:
-                                    st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
-                                else:
-                                    st.session_state.grupo_atual += 1
+                        # Removendo a validação de todas as respostas preenchidas
+                        if grupo == "1 - Eficiência de Gestão":
+                            valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                            if valor_percentual_grupo1 < 25:
+                                st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
                             else:
                                 st.session_state.grupo_atual += 1
+                        elif grupo == "2 - Estruturas":
+                            valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                            valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
+                            soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
+
+                            if soma_percentual <= 50:
+                                st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
+                            else:
+                                st.session_state.grupo_atual += 1
+                        else:
+                            st.session_state.grupo_atual += 1
 
                             # Exibe o nível do usuário após preencher o grupo atual
                             respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
