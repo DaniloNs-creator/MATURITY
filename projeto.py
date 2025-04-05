@@ -54,7 +54,7 @@ if not st.session_state.formulario_preenchido:
     empresa = st.text_input("Empresa")
     telefone = st.text_input("Telefone")
     if st.button("Prosseguir"):
-        if nome and email and empresa and telefone:  # Corrigido: adicionando "and" entre "empresa" e "telefone"
+        if nome and email and empresa and telefone:
             st.session_state.nome = nome
             st.session_state.email = email
             st.session_state.empresa = empresa
@@ -193,6 +193,19 @@ else:
                 "5.01", "5.03", "5.04", "5.07", "5.10", "5.32", "5.35", "5.40"
             ]
 
+            # Grupos obrigatórios (4, 6, 7, 8, 9, 10, 11, 12, 13)
+            grupos_obrigatorios = [
+                "4 - Gestão de Riscos",
+                "6 - Governança Corporativa",
+                "7 - Recursos Humanos",
+                "8 - Tecnologia da Informação",
+                "9 - Compras",
+                "10 - Estoques",
+                "11 - Contabilidade e Controle Financeiro",
+                "12 - Logística e Distribuição",
+                "13 - Contabilidade e Controle Financeiro"
+            ]
+
             if grupo_atual < len(grupos):
                 grupo = grupos[grupo_atual]
 
@@ -225,14 +238,24 @@ else:
                     st.markdown(TEXTO_GRUPO13)
 
                 st.write(f"### {perguntas_hierarquicas[grupo]['titulo']}")
-                todas_respostas_preenchidas = True  # Verifica se todas as perguntas foram respondidas
+                
+                # Verifica se todas as perguntas obrigatórias foram respondidas
+                todas_obrigatorias_preenchidas = True
+                obrigatorias_no_grupo = []
+                
+                for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
+                    if subitem in perguntas_obrigatorias:
+                        obrigatorias_no_grupo.append(subitem)
+                        if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
+                            todas_obrigatorias_preenchidas = False
+
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
                     if subitem not in st.session_state.respostas:
                         st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
 
                     # Adiciona destaque em negrito para perguntas obrigatórias
                     if subitem in perguntas_obrigatorias:
-                        pergunta_label = f"**{subitem} - {subpergunta}**"  # Destaca em negrito
+                        pergunta_label = f"**{subitem} - {subpergunta}** (OBRIGATÓRIO)"  # Destaca em negrito
                     else:
                         pergunta_label = f"{subitem} - {subpergunta}"
 
@@ -242,8 +265,6 @@ else:
                         index=list(mapeamento_respostas.keys()).index(st.session_state.respostas[subitem])
                     )
                     st.session_state.respostas[subitem] = resposta
-                    if resposta == "Selecione":
-                        todas_respostas_preenchidas = False  # Marca como incompleto se alguma resposta for "Selecione"
 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -252,24 +273,35 @@ else:
                             st.session_state.grupo_atual -= 1
                 with col2:
                     if st.button("Prosseguir"):
-                        # Removendo a validação de todas as respostas preenchidas
-                        if grupo == "1 - Eficiência de Gestão":
-                            valor_percentual_grupo1 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                            if valor_percentual_grupo1 < 25:
-                                st.error("Não foi possível prosseguir. O resultado do Grupo 1 - Eficiência de Gestão é menor que 25.")
-                            else:
-                                st.session_state.grupo_atual += 1
-                        elif grupo == "2 - Estruturas":
-                            valor_percentual_grupo1 = calcular_porcentagem_grupo("1 - Eficiência de Gestão", perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                            valor_percentual_grupo2 = calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()})
-                            soma_percentual = valor_percentual_grupo1 + valor_percentual_grupo2
+                        # Verifica se todas as perguntas obrigatórias do grupo atual foram respondidas
+                        obrigatorias_no_grupo = [
+                            subitem for subitem in perguntas_hierarquicas[grupo]["subitens"].keys()
+                            if subitem in perguntas_obrigatorias
+                        ]
+                        todas_obrigatorias_preenchidas = all(
+                            st.session_state.respostas.get(subitem, "Selecione") != "Selecione"
+                            for subitem in obrigatorias_no_grupo
+                        )
 
-                            if soma_percentual <= 50:
-                                st.error("Não é possível prosseguir. A soma dos Grupos 1 e 2 é menor ou igual a 50.")
-                            else:
-                                st.session_state.grupo_atual += 1
+                        # Verifica se todos os grupos obrigatórios foram completamente preenchidos
+                        grupos_obrigatorios_completos = True
+                        grupos_incompletos = []
+                        for grupo_obrigatorio in grupos_obrigatorios:
+                            if grupo_obrigatorio in perguntas_hierarquicas:
+                                for subitem in perguntas_hierarquicas[grupo_obrigatorio]["subitens"].keys():
+                                    if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
+                                        grupos_obrigatorios_completos = False
+                                        grupos_incompletos.append(grupo_obrigatorio)
+                                        break
+
+                        if not todas_obrigatorias_preenchidas:
+                            st.error(f"Por favor, responda todas as perguntas obrigatórias deste grupo antes de prosseguir: {', '.join(obrigatorias_no_grupo)}")
+                        elif not grupos_obrigatorios_completos:
+                            st.error(f"Os seguintes grupos obrigatórios não foram completamente preenchidos: {', '.join(set(grupos_incompletos))}")
                         else:
+                            # Avança para o próximo grupo
                             st.session_state.grupo_atual += 1
+                            st.success("Você avançou para o próximo grupo.")
 
                             # Exibe o nível do usuário após preencher o grupo atual
                             respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
@@ -323,88 +355,117 @@ else:
             else:
                 st.write("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico"):
-                    respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
-                    categorias = []
-                    valores = []
-                    valores_normalizados = []
-                    soma_total_respostas = sum(respostas.values())
-                    for item, conteudo in perguntas_hierarquicas.items():
-                        soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
-                        num_perguntas = len(conteudo["subitens"])
-                        if num_perguntas > 0:
-                            valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-                            valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
-                            categorias.append(conteudo["titulo"])
-                            valores.append(valor_percentual)
-                            valores_normalizados.append(valor_normalizado)
-                    if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
-                        st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
+                    # Verifica se todas as perguntas obrigatórias foram respondidas
+                    todas_obrigatorias_respondidas = True
+                    obrigatorias_nao_respondidas = []
+                    
+                    for pergunta in perguntas_obrigatorias:
+                        if st.session_state.respostas.get(pergunta, "Selecione") == "Selecione":
+                            todas_obrigatorias_respondidas = False
+                            obrigatorias_nao_respondidas.append(pergunta)
+                    
+                    # Verifica se todos os grupos obrigatórios foram completamente respondidos
+                    grupos_obrigatorios_completos = True
+                    grupos_incompletos = []
+                    
+                    for grupo_obrigatorio in grupos_obrigatorios:
+                        if grupo_obrigatorio in perguntas_hierarquicas:
+                            for subitem in perguntas_hierarquicas[grupo_obrigatorio]["subitens"].keys():
+                                if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
+                                    grupos_obrigatorios_completos = False
+                                    grupos_incompletos.append(grupo_obrigatorio)
+                                    break
+                    
+                    if not todas_obrigatorias_respondidas or not grupos_obrigatorios_completos:
+                        mensagem_erro = []
+                        if not todas_obrigatorias_respondidas:
+                            mensagem_erro.append(f"Perguntas obrigatórias não respondidas: {', '.join(obrigatorias_nao_respondidas)}")
+                        if not grupos_obrigatorios_completos:
+                            mensagem_erro.append(f"Grupos obrigatórios incompletos: {', '.join(set(grupos_incompletos))}")
+                        st.error(" | ".join(mensagem_erro))
                     else:
-                        if categorias:
-                            valores_original = valores + valores[:1]
-                            categorias_original = categorias + categorias[:1]
-                            import plotly.graph_objects as go
-                            fig_original = go.Figure()
-                            fig_original.add_trace(go.Scatterpolar(
-                                r=valores_original,
-                                theta=categorias_original,
-                                fill='toself',
-                                name='Gráfico Original'
-                            ))
-                            fig_original.update_layout(
-                                polar=dict(
-                                    radialaxis=dict(
-                                        visible=True,
-                                        range=[0, 100]
-                                    )),
-                                showlegend=False
-                            )
-                            valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
-                            fig_normalizado = go.Figure()
-                            fig_normalizado.add_trace(go.Scatterpolar(
-                                r=valores_normalizados_fechado,
-                                theta=categorias_original,
-                                fill='toself',
-                                name='Gráfico Normalizado'
-                            ))
-                            fig_normalizado.update_layout(
-                                polar=dict(
-                                    radialaxis=dict(
-                                        visible=True,
-                                        range=[0, 100]
-                                    )),
-                                showlegend=False
-                            )
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.plotly_chart(fig_original, use_container_width=True)
-                                st.write("### Gráfico 1")
-                                df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-                                total_porcentagem = df_grafico_original['Porcentagem'].sum()
-                                df_grafico_original.loc['Total'] = ['Total', total_porcentagem]
-                                st.dataframe(df_grafico_original)
+                        respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
+                        categorias = []
+                        valores = []
+                        valores_normalizados = []
+                        soma_total_respostas = sum(respostas.values())
+                        for item, conteudo in perguntas_hierarquicas.items():
+                            soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
+                            num_perguntas = len(conteudo["subitens"])
+                            if num_perguntas > 0:
+                                valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+                                valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
+                                categorias.append(conteudo["titulo"])
+                                valores.append(valor_percentual)
+                                valores_normalizados.append(valor_normalizado)
+                        if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
+                            st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
+                        else:
+                            if categorias:
+                                valores_original = valores + valores[:1]
+                                categorias_original = categorias + categorias[:1]
+                                import plotly.graph_objects as go
+                                fig_original = go.Figure()
+                                fig_original.add_trace(go.Scatterpolar(
+                                    r=valores_original,
+                                    theta=categorias_original,
+                                    fill='toself',
+                                    name='Gráfico Original'
+                                ))
+                                fig_original.update_layout(
+                                    polar=dict(
+                                        radialaxis=dict(
+                                            visible=True,
+                                            range=[0, 100]
+                                        )),
+                                    showlegend=False
+                                )
+                                valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
+                                fig_normalizado = go.Figure()
+                                fig_normalizado.add_trace(go.Scatterpolar(
+                                    r=valores_normalizados_fechado,
+                                    theta=categorias_original,
+                                    fill='toself',
+                                    name='Gráfico Normalizado'
+                                ))
+                                fig_normalizado.update_layout(
+                                    polar=dict(
+                                        radialaxis=dict(
+                                            visible=True,
+                                            range=[0, 100]
+                                        )),
+                                    showlegend=False
+                                )
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.plotly_chart(fig_original, use_container_width=True)
+                                    st.write("### Gráfico 1")
+                                    df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
+                                    total_porcentagem = df_grafico_original['Porcentagem'].sum()
+                                    df_grafico_original.loc['Total'] = ['Total', total_porcentagem]
+                                    st.dataframe(df_grafico_original)
 
-                                if total_porcentagem < 26:
-                                    st.warning("SEU NIVEL É INICIAL")
-                                elif total_porcentagem < 51:
-                                    st.warning("SEU NIVEL É REPETITIVO")
-                                elif total_porcentagem < 71:
-                                    st.warning("SEU NIVEL É DEFINIDO")
-                                elif total_porcentagem < 90:
-                                    st.warning("SEU NIVEL É GERENCIADO")
-                                elif total_porcentagem >= 91:
-                                    st.success("SEU NIVEL É OTIMIZADO")
-                            with col2:
-                                st.plotly_chart(fig_normalizado, use_container_width=True)
-                                st.write("### Gráfico 2")
-                                df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
-                                st.dataframe(df_grafico_normalizado)
-                            excel_data = exportar_para_excel_completo(st.session_state.respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
-                            st.download_button(
-                                label="Exportar para Excel",
-                                data=excel_data,
-                                file_name="respostas_e_grafico.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            )
+                                    if total_porcentagem < 26:
+                                        st.warning("SEU NIVEL É INICIAL")
+                                    elif total_porcentagem < 51:
+                                        st.warning("SEU NIVEL É REPETITIVO")
+                                    elif total_porcentagem < 71:
+                                        st.warning("SEU NIVEL É DEFINIDO")
+                                    elif total_porcentagem < 90:
+                                        st.warning("SEU NIVEL É GERENCIADO")
+                                    elif total_porcentagem >= 91:
+                                        st.success("SEU NIVEL É OTIMIZADO")
+                                with col2:
+                                    st.plotly_chart(fig_normalizado, use_container_width=True)
+                                    st.write("### Gráfico 2")
+                                    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
+                                    st.dataframe(df_grafico_normalizado)
+                                excel_data = exportar_para_excel_completo(st.session_state.respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
+                                st.download_button(
+                                    label="Exportar para Excel",
+                                    data=excel_data,
+                                    file_name="respostas_e_grafico.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                )
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
