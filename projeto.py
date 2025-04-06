@@ -574,3 +574,31 @@ else:
                             st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
+
+# Garantir que todas as perguntas obrigatórias sejam inicializadas no dicionário de respostas
+for grupo, conteudo in perguntas_hierarquicas.items():
+    for subitem in conteudo["subitens"].keys():
+        if subitem not in st.session_state.respostas:
+            st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
+
+# Adicionando verificações para evitar erros ao acessar chaves inexistentes
+try:
+    respostas = {k: mapeamento_respostas.get(v, 0) for k, v in st.session_state.respostas.items()}
+except KeyError as e:
+    st.error(f"Erro ao acessar chave inexistente: {e}")
+    st.write("Estado atual das respostas:", st.session_state.respostas)
+    st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
+    st.stop()
+
+# Verificar se todas as perguntas obrigatórias estão presentes no dicionário de respostas
+for pergunta in perguntas_obrigatorias:
+    if pergunta not in st.session_state.respostas:
+        st.session_state.respostas[pergunta] = "Selecione"  # Inicializa com "Selecione"
+
+# Adicionando logs para depuração
+if "2.1" not in st.session_state.respostas:
+    st.warning("A pergunta '2.1' não foi encontrada no dicionário de respostas. Verifique o arquivo de entrada.")
+    st.write("Estado atual das respostas:", st.session_state.respostas)
+    st.write("Perguntas obrigatórias:", perguntas_obrigatorias)
+    st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
+    st.stop()
