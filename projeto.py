@@ -379,6 +379,11 @@ else:
                         if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
                             todas_obrigatorias_preenchidas = False
 
+                # Adicionando verificações para evitar erros ao acessar chaves inexistentes
+                for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
+                    if subitem not in st.session_state.respostas:
+                        st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
+
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
                     if subitem not in st.session_state.respostas:
                         st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
@@ -474,91 +479,98 @@ else:
                             mensagem_erro.append(f"Grupos obrigatórios incompletos: {', '.join(set(grupos_incompletos))}")
                         st.error(" | ".join(mensagem_erro))
                     else:
-                        respostas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
-                        categorias = []
-                        valores = []
-                        valores_normalizados = []
-                        soma_total_respostas = sum(respostas.values())
-                        for item, conteudo in perguntas_hierarquicas.items():
-                            soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
-                            num_perguntas = len(conteudo["subitens"])
-                            if num_perguntas > 0:
-                                valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-                                valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
-                                categorias.append(conteudo["titulo"])
-                                valores.append(valor_percentual)
-                                valores_normalizados.append(valor_normalizado)
-                        if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
-                            st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
-                        else:
-                            if categorias:
-                                valores_original = valores + valores[:1]
-                                categorias_original = categorias + categorias[:1]
-                                fig_original = go.Figure()
-                                fig_original.add_trace(go.Scatterpolar(
-                                    r=valores_original,
-                                    theta=categorias_original,
-                                    fill='toself',
-                                    name='Gráfico Original'
-                                ))
-                                fig_original.update_layout(
-                                    polar=dict(
-                                        radialaxis=dict(
-                                            visible=True,
-                                            range=[0, 100]
-                                        )),
-                                    showlegend=False
-                                )
-                                valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
-                                fig_normalizado = go.Figure()
-                                fig_normalizado.add_trace(go.Scatterpolar(
-                                    r=valores_normalizados_fechado,
-                                    theta=categorias_original,
-                                    fill='toself',
-                                    name='Gráfico Normalizado'
-                                ))
-                                fig_normalizado.update_layout(
-                                    polar=dict(
-                                        radialaxis=dict(
-                                            visible=True,
-                                            range=[0, 100]
-                                        )),
-                                    showlegend=False
-                                )
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.plotly_chart(fig_original, use_container_width=True)
-                                    st.write("### Gráfico 1")
-                                    df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-                                    total_porcentagem = df_grafico_original['Porcentagem'].sum()
-                                    df_grafico_original.loc['Total'] = ['Total', total_porcentagem]
-                                    st.dataframe(df_grafico_original)
+                        # Adicionando logs para depuração
+                        try:
+                            respostas = {k: mapeamento_respostas.get(v, 0) for k, v in st.session_state.respostas.items()}
+                            categorias = []
+                            valores = []
+                            valores_normalizados = []
+                            soma_total_respostas = sum(respostas.values())
+                            for item, conteudo in perguntas_hierarquicas.items():
+                                soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
+                                num_perguntas = len(conteudo["subitens"])
+                                if num_perguntas > 0:
+                                    valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+                                    valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
+                                    categorias.append(conteudo["titulo"])
+                                    valores.append(valor_percentual)
+                                    valores_normalizados.append(valor_normalizado)
+                            if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
+                                st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
+                            else:
+                                if categorias:
+                                    valores_original = valores + valores[:1]
+                                    categorias_original = categorias + categorias[:1]
+                                    fig_original = go.Figure()
+                                    fig_original.add_trace(go.Scatterpolar(
+                                        r=valores_original,
+                                        theta=categorias_original,
+                                        fill='toself',
+                                        name='Gráfico Original'
+                                    ))
+                                    fig_original.update_layout(
+                                        polar=dict(
+                                            radialaxis=dict(
+                                                visible=True,
+                                                range=[0, 100]
+                                            )),
+                                        showlegend=False
+                                    )
+                                    valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
+                                    fig_normalizado = go.Figure()
+                                    fig_normalizado.add_trace(go.Scatterpolar(
+                                        r=valores_normalizados_fechado,
+                                        theta=categorias_original,
+                                        fill='toself',
+                                        name='Gráfico Normalizado'
+                                    ))
+                                    fig_normalizado.update_layout(
+                                        polar=dict(
+                                            radialaxis=dict(
+                                                visible=True,
+                                                range=[0, 100]
+                                            )),
+                                        showlegend=False
+                                    )
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.plotly_chart(fig_original, use_container_width=True)
+                                        st.write("### Gráfico 1")
+                                        df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
+                                        total_porcentagem = df_grafico_original['Porcentagem'].sum()
+                                        df_grafico_original.loc['Total'] = ['Total', total_porcentagem]
+                                        st.dataframe(df_grafico_original)
 
-                                    if total_porcentagem < 26:
-                                        st.warning("SEU NIVEL É INICIAL")
-                                    elif total_porcentagem < 51:
-                                        st.warning("SEU NIVEL É REPETITIVO")
-                                    elif total_porcentagem < 71:
-                                        st.warning("SEU NIVEL É DEFINIDO")
-                                    elif total_porcentagem < 90:
-                                        st.warning("SEU NIVEL É GERENCIADO")
-                                    elif total_porcentagem >= 91:
-                                        st.success("SEU NIVEL É OTIMIZADO")
-                                with col2:
-                                    st.plotly_chart(fig_normalizado, use_container_width=True)
-                                    st.write("### Gráfico 2")
-                                    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
-                                    st.dataframe(df_grafico_normalizado)
-                                
-                                # Mostrar nível de maturidade completo
-                                mostrar_nivel_maturidade(total_porcentagem)
-                                
-                                excel_data = exportar_para_excel_completo(st.session_state.respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
-                                st.download_button(
-                                    label="Exportar para Excel",
-                                    data=excel_data,
-                                    file_name="respostas_e_grafico.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                )
+                                        if total_porcentagem < 26:
+                                            st.warning("SEU NIVEL É INICIAL")
+                                        elif total_porcentagem < 51:
+                                            st.warning("SEU NIVEL É REPETITIVO")
+                                        elif total_porcentagem < 71:
+                                            st.warning("SEU NIVEL É DEFINIDO")
+                                        elif total_porcentagem < 90:
+                                            st.warning("SEU NIVEL É GERENCIADO")
+                                        elif total_porcentagem >= 91:
+                                            st.success("SEU NIVEL É OTIMIZADO")
+                                    with col2:
+                                        st.plotly_chart(fig_normalizado, use_container_width=True)
+                                        st.write("### Gráfico 2")
+                                        df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
+                                        st.dataframe(df_grafico_normalizado)
+                                    
+                                    # Mostrar nível de maturidade completo
+                                    mostrar_nivel_maturidade(total_porcentagem)
+                                    
+                                    excel_data = exportar_para_excel_completo(st.session_state.respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
+                                    st.download_button(
+                                        label="Exportar para Excel",
+                                        data=excel_data,
+                                        file_name="respostas_e_grafico.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    )
+                        except KeyError as e:
+                            st.error(f"Erro ao acessar chave inexistente: {e}")
+                            st.write("Estado atual das respostas:", st.session_state.respostas)
+                            st.write("Perguntas obrigatórias:", perguntas_obrigatorias)
+                            st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
