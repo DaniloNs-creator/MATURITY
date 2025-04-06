@@ -450,7 +450,7 @@ else:
                     obrigatorias_nao_respondidas = []
                     
                     for pergunta in perguntas_obrigatorias:
-                        if st.session_state.respostas.get(pergunta, "Selecione") == "Selecione":
+                        if pergunta not in st.session_state.respostas or st.session_state.respostas.get(pergunta, "Selecione") == "Selecione":
                             todas_obrigatorias_respondidas = False
                             obrigatorias_nao_respondidas.append(pergunta)
                     
@@ -461,7 +461,7 @@ else:
                     for grupo_obrigatorio in grupos_obrigatorios:
                         if grupo_obrigatorio in perguntas_hierarquicas:
                             for subitem in perguntas_hierarquicas[grupo_obrigatorio]["subitens"].keys():
-                                if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
+                                if subitem not in st.session_state.respostas or st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
                                     grupos_obrigatorios_completos = False
                                     grupos_incompletos.append(grupo_obrigatorio)
                                     break
