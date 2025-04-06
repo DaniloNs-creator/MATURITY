@@ -16,6 +16,18 @@ mapeamento_respostas = {
     "Completamente implementado": 5
 }
 
+# Função para verificar se todas as perguntas obrigatórias foram respondidas
+def verificar_obrigatorias_preenchidas(grupo, perguntas_hierarquicas, perguntas_obrigatorias, respostas):
+    obrigatorias_no_grupo = [
+        subitem for subitem in perguntas_hierarquicas[grupo]["subitens"].keys()
+        if subitem in perguntas_obrigatorias
+    ]
+    todas_preenchidas = all(
+        respostas.get(subitem, "Selecione") != "Selecione"
+        for subitem in obrigatorias_no_grupo
+    )
+    return todas_preenchidas, obrigatorias_no_grupo
+
 def calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, respostas):
     soma_respostas = sum(respostas[subitem] for subitem in perguntas_hierarquicas[grupo]["subitens"].keys())
     num_perguntas = len(perguntas_hierarquicas[grupo]["subitens"])
@@ -283,21 +295,8 @@ else:
                             for subitem in obrigatorias_no_grupo
                         )
 
-                        # Verifica se todos os grupos obrigatórios foram completamente preenchidos
-                        grupos_obrigatorios_completos = True
-                        grupos_incompletos = []
-                        for grupo_obrigatorio in grupos_obrigatorios:
-                            if grupo_obrigatorio in perguntas_hierarquicas:
-                                for subitem in perguntas_hierarquicas[grupo_obrigatorio]["subitens"].keys():
-                                    if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
-                                        grupos_obrigatorios_completos = False
-                                        grupos_incompletos.append(grupo_obrigatorio)
-                                        break
-
                         if not todas_obrigatorias_preenchidas:
                             st.error(f"Por favor, responda todas as perguntas obrigatórias deste grupo antes de prosseguir: {', '.join(obrigatorias_no_grupo)}")
-                        elif not grupos_obrigatorios_completos:
-                            st.error(f"Os seguintes grupos obrigatórios não foram completamente preenchidos: {', '.join(set(grupos_incompletos))}")
                         else:
                             # Avança para o próximo grupo
                             st.session_state.grupo_atual += 1
