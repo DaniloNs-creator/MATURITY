@@ -402,7 +402,7 @@ else:
                     with st.expander(f"Bloco {idx + 1} de perguntas"):
                         for subitem, subpergunta in bloco:
                             if subitem in perguntas_obrigatorias:
-                                pergunta_label = f"**{subitem} - {subpergunta}** (OBRIGATÓRIO)"  # Destaca em negrito
+                                pergunta_label = f"**:red[{subitem} - {subpergunta}]** (OBRIGATÓRIO)"  # Destaca em vermelho
                             else:
                                 pergunta_label = f"{subitem} - {subpergunta}"
 
@@ -586,6 +586,14 @@ else:
                             st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
+
+# Garantir que perguntas_hierarquicas esteja definido
+if 'perguntas_hierarquicas' not in locals():
+    perguntas_hierarquicas = {}
+
+# Garantir que perguntas_obrigatorias esteja definido
+if 'perguntas_obrigatorias' not in locals():
+    perguntas_obrigatorias = []
 
 # Garantir que todas as perguntas obrigatórias sejam inicializadas no dicionário de respostas
 for grupo, conteudo in perguntas_hierarquicas.items():
