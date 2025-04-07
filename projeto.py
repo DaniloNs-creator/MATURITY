@@ -167,6 +167,8 @@ if "mostrar_graficos" not in st.session_state:
     st.session_state.mostrar_graficos = False
 
 if not st.session_state.formulario_preenchido:
+    # Adicionando a imagem no início com tamanho reduzido
+    st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png", width=300)
     st.title("MATRIZ DE MATURIDADE DE COMPLIANCE E PROCESSOS")
     st.subheader("Por favor, preencha suas informações antes de prosseguir")
 
@@ -226,9 +228,11 @@ else:
             
             # Criando navegação por grupos
             with st.sidebar:
+               
+                # Corrigindo o caminho da imagem para o URL bruto do GitHub
+                st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png")
                 st.title("Navegação por Grupos")
-                # Adicionando a imagem novamente dentro da navegação
-                st.image("https://github.com/DaniloNs-creator/MATURITY/blob/main/logo.png")
+                
                 tab1, tab2, tab3, tab4 = st.tabs(["FINANCEIRA", "GESTÃO", "GOVERNANÇA", "SETORES"])
                 
                 with tab1:
@@ -390,18 +394,24 @@ else:
                     if subitem not in st.session_state.respostas:
                         st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
 
-                    # Adiciona destaque em negrito para perguntas obrigatórias
-                    if subitem in perguntas_obrigatorias:
-                        pergunta_label = f"**{subitem} - {subpergunta}** (OBRIGATÓRIO)"  # Destaca em negrito
-                    else:
-                        pergunta_label = f"{subitem} - {subpergunta}"
+                # Dividindo as perguntas em blocos de 10
+                subitens = list(perguntas_hierarquicas[grupo]["subitens"].items())
+                blocos = [subitens[i:i + 10] for i in range(0, len(subitens), 10)]
 
-                    resposta = st.selectbox(
-                        pergunta_label,
-                        options=list(mapeamento_respostas.keys()),
-                        index=list(mapeamento_respostas.keys()).index(st.session_state.respostas[subitem])
-                    )
-                    st.session_state.respostas[subitem] = resposta
+                for idx, bloco in enumerate(blocos):
+                    with st.expander(f"Bloco {idx + 1} de perguntas"):
+                        for subitem, subpergunta in bloco:
+                            if subitem in perguntas_obrigatorias:
+                                pergunta_label = f"**{subitem} - {subpergunta}** (OBRIGATÓRIO)"  # Destaca em negrito
+                            else:
+                                pergunta_label = f"{subitem} - {subpergunta}"
+
+                            resposta = st.selectbox(
+                                pergunta_label,
+                                options=list(mapeamento_respostas.keys()),
+                                index=list(mapeamento_respostas.keys()).index(st.session_state.respostas[subitem])
+                            )
+                            st.session_state.respostas[subitem] = resposta
 
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -596,4 +606,3 @@ except KeyError as e:
 for pergunta in perguntas_obrigatorias:
     if pergunta not in st.session_state.respostas:
         st.session_state.respostas[pergunta] = "Selecione"  # Inicializa com "Selecione"
-
