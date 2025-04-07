@@ -227,6 +227,8 @@ else:
             # Criando navegação por grupos
             with st.sidebar:
                 st.title("Navegação por Grupos")
+                # Adicionando a imagem novamente dentro da navegação
+                st.image("https://github.com/DaniloNs-creator/MATURITY/blob/main/logo.png")
                 tab1, tab2, tab3, tab4 = st.tabs(["FINANCEIRA", "GESTÃO", "GOVERNANÇA", "SETORES"])
                 
                 with tab1:
