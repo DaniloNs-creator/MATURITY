@@ -595,10 +595,3 @@ for pergunta in perguntas_obrigatorias:
     if pergunta not in st.session_state.respostas:
         st.session_state.respostas[pergunta] = "Selecione"  # Inicializa com "Selecione"
 
-# Adicionando logs para depuração
-if "2.1" not in st.session_state.respostas:
-    st.warning("A pergunta '2.1' não foi encontrada no dicionário de respostas. Verifique o arquivo de entrada.")
-    st.write("Estado atual das respostas:", st.session_state.respostas)
-    st.write("Perguntas obrigatórias:", perguntas_obrigatorias)
-    st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
-    st.stop()
