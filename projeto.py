@@ -4,6 +4,7 @@ import numpy as np
 from io import BytesIO
 import requests
 import plotly.graph_objects as go
+import base64  # Para converter imagens em base64
 
 st.set_page_config(layout='wide')
 
@@ -16,6 +17,13 @@ mapeamento_respostas = {
     "Avançado": 4,
     "Completamente implementado": 5
 }
+
+# Verificar se o pacote kaleido está instalado
+try:
+    import kaleido
+except ImportError:
+    st.error("O pacote 'kaleido' é necessário para exportar gráficos como imagens. Por favor, instale-o executando: pip install -U kaleido")
+    st.stop()
 
 # Função para verificar se todas as perguntas obrigatórias foram respondidas
 def verificar_obrigatorias_preenchidas(grupo, perguntas_hierarquicas, perguntas_obrigatorias, respostas):
@@ -49,6 +57,42 @@ def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, 
         df_respostas.to_excel(writer, index=False, sheet_name='Respostas')
         df_grafico.to_excel(writer, index=False, sheet_name='Gráfico')
         df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
+    return output.getvalue()
+
+def exportar_graficos_e_respostas(respostas, perguntas_hierarquicas, categorias, valores, valores_normalizados, fig_original, fig_normalizado):
+    # Exportar respostas e gráficos para Excel
+    linhas = []
+    for item, conteudo in perguntas_hierarquicas.items():
+        for subitem, subpergunta in conteudo["subitens"].items():
+            linhas.append({"Pergunta": subpergunta, "Resposta": respostas[subitem]})
+
+    df_respostas = pd.DataFrame(linhas)
+    df_grafico = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
+    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
+
+    # Salvar gráficos como imagens usando kaleido
+    img_original = BytesIO()
+    fig_original.write_image(img_original, format="png", engine="kaleido")
+    img_original.seek(0)
+
+    img_normalizado = BytesIO()
+    fig_normalizado.write_image(img_normalizado, format="png", engine="kaleido")
+    img_normalizado.seek(0)
+
+    # Criar arquivo Excel
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_respostas.to_excel(writer, index=False, sheet_name='Respostas')
+        df_grafico.to_excel(writer, index=False, sheet_name='Gráfico')
+        df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
+
+        # Adicionar imagens ao Excel
+        workbook = writer.book
+        worksheet = workbook.add_worksheet('Gráficos')
+        writer.sheets['Gráficos'] = worksheet
+        worksheet.insert_image('B2', 'grafico_original.png', {'image_data': img_original})
+        worksheet.insert_image('B20', 'grafico_normalizado.png', {'image_data': img_normalizado})
+
     return output.getvalue()
 
 def gerar_graficos_radar(perguntas_hierarquicas, respostas):
@@ -284,6 +328,11 @@ else:
     try:
         response = requests.get(url_arquivo)
         response.raise_for_status()
+
+        # Inicializar as variáveis para evitar erros
+        categorias = []
+        valores = []
+        valores_normalizados = []
 
         lines = response.text.splitlines()
         data = []
@@ -544,6 +593,24 @@ else:
                             st.plotly_chart(fig_original, use_container_width=True)
                         with col2:
                             st.plotly_chart(fig_normalizado, use_container_width=True)
+                        
+                        # Adicionar botão "EXPORTAR"
+                        if st.button("EXPORTAR"):
+                            excel_data = exportar_graficos_e_respostas(
+                                st.session_state.respostas,
+                                perguntas_hierarquicas,
+                                categorias[:-1],
+                                valores[:-1],
+                                valores_normalizados[:-1],
+                                fig_original,
+                                fig_normalizado
+                            )
+                            st.download_button(
+                                label="Baixar Questionário e Gráficos",
+                                data=excel_data,
+                                file_name="questionario_e_graficos.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            )
                         
                         # Calcular e exibir o nível atual apenas para o grupo atual
                         grupo_atual = grupos[st.session_state.grupo_atual]
