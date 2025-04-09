@@ -258,24 +258,27 @@ if "mostrar_graficos" not in st.session_state:
 
 if not st.session_state.formulario_preenchido:
     # Adicionando a imagem no início com tamanho reduzido
-    st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png", width=300)
-    st.title("MATRIZ DE MATURIDADE DE COMPLIANCE E PROCESSOS")
-    st.subheader("Por favor, preencha suas informações antes de prosseguir")
-
-    nome = st.text_input("Nome")
-    email = st.text_input("E-mail")
-    empresa = st.text_input("Empresa")
-    telefone = st.text_input("Telefone")
-    if st.button("Prosseguir"):
-        if nome and email and empresa and telefone:
-            st.session_state.nome = nome
-            st.session_state.email = email
-            st.session_state.empresa = empresa
-            st.session_state.telefone = telefone
-            st.session_state.formulario_preenchido = True
-            st.success("Informações preenchidas com sucesso! Você pode prosseguir para o questionário.")
-        else:
-            st.error("Por favor, preencha todos os campos antes de prosseguir.")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png", width=300)
+        st.title("MATRIZ DE MATURIDADE DE COMPLIANCE E PROCESSOS")
+        st.subheader("Por favor, preencha suas informações antes de prosseguir")
+        nome = st.text_input("Nome")
+        email = st.text_input("E-mail")
+        empresa = st.text_input("Empresa")
+        telefone = st.text_input("Telefone")
+        if st.button("Prosseguir"):
+            if nome and email and empresa and telefone:
+                st.session_state.nome = nome
+                st.session_state.email = email
+                st.session_state.empresa = empresa
+                st.session_state.telefone = telefone
+                st.session_state.formulario_preenchido = True
+                st.success("Informações preenchidas com sucesso! Você pode prosseguir para o questionário.")
+            else:
+                st.error("Por favor, preencha todos os campos antes de prosseguir.")
+    with col2:
+        st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/foto.jpg", use_container_width=True)
 else:
     url_arquivo = "https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/FOMULARIO.txt"
     try:
@@ -326,37 +329,37 @@ else:
                 tab1, tab2, tab3, tab4 = st.tabs(["FINANCEIRA", "GESTÃO", "GOVERNANÇA", "SETORES"])
                 
                 with tab1:
-                    if st.button("Eficiência de Gestão"):
+                    if st.button("**Eficiência de Gestão**" if st.session_state.grupo_atual == 0 else "Eficiência de Gestão"):
                         st.session_state.grupo_atual = 0
                 
                 with tab2:
-                    if st.button("Estruturas"):
+                    if st.button("**Estruturas**" if st.session_state.grupo_atual == 1 else "Estruturas"):
                         st.session_state.grupo_atual = 1
                 
                 with tab3:
-                    if st.button("Gestão de Processos"):
+                    if st.button("**Gestão de Processos**" if st.session_state.grupo_atual == 2 else "Gestão de Processos"):
                         st.session_state.grupo_atual = 2
-                    if st.button("Gestão de Riscos"):
+                    if st.button("**Gestão de Riscos**" if st.session_state.grupo_atual == 3 else "Gestão de Riscos"):
                         st.session_state.grupo_atual = 3
-                    if st.button("Compliance"):
+                    if st.button("**Compliance**" if st.session_state.grupo_atual == 4 else "Compliance"):
                         st.session_state.grupo_atual = 4
-                    if st.button("Canal de Denúncias"):
+                    if st.button("**Canal de Denúncias**" if st.session_state.grupo_atual == 5 else "Canal de Denúncias"):
                         st.session_state.grupo_atual = 5
-                    if st.button("Governança Corporativa"):
+                    if st.button("**Governança Corporativa**" if st.session_state.grupo_atual == 6 else "Governança Corporativa"):
                         st.session_state.grupo_atual = 6
                 
                 with tab4:
-                    if st.button("Recursos Humanos"):
+                    if st.button("**Recursos Humanos**" if st.session_state.grupo_atual == 7 else "Recursos Humanos"):
                         st.session_state.grupo_atual = 7
-                    if st.button("Tecnologia da Informação"):
+                    if st.button("**Tecnologia da Informação**" if st.session_state.grupo_atual == 8 else "Tecnologia da Informação"):
                         st.session_state.grupo_atual = 8
-                    if st.button("Compras"):
+                    if st.button("**Compras**" if st.session_state.grupo_atual == 9 else "Compras"):
                         st.session_state.grupo_atual = 9
-                    if st.button("Estoques"):
+                    if st.button("**Estoques**" if st.session_state.grupo_atual == 10 else "Estoques"):
                         st.session_state.grupo_atual = 10
-                    if st.button("Contabilidade e Controle Financeiro"):
+                    if st.button("**Contabilidade e Controle Financeiro**" if st.session_state.grupo_atual == 11 else "Contabilidade e Controle Financeiro"):
                         st.session_state.grupo_atual = 11
-                    if st.button("Logística e Distribuição"):
+                    if st.button("**Logística e Distribuição**" if st.session_state.grupo_atual == 12 else "Logística e Distribuição"):
                         st.session_state.grupo_atual = 12
 
             grupo_atual = st.session_state.grupo_atual
