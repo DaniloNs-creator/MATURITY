@@ -156,73 +156,8 @@ def gerar_graficos_radar(perguntas_hierarquicas, respostas):
     
     return fig_original, fig_normalizado
 
-# Função para exibir a tabela de níveis de maturidade com destaque no nível atual
-def exibir_tabela_niveis_maturidade(nivel_atual):
-    niveis = [
-        {
-            "Nível": "INICIAL",
-            "Descrição": (
-                "A organização opera de forma desestruturada, sem processos claramente definidos ou formalizados. "
-                "As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, "
-                "tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada. "
-                "A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais "
-                "e elevado risco de não conformidade regulatória."
-            )
-        },
-        {
-            "Nível": "ORGANIZAÇÃO",
-            "Descrição": (
-                "A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada. "
-                "Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência "
-                "na execução continue limitada. As atividades ainda dependem fortemente da experiência individual, e a governança sobre "
-                "os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos."
-            )
-        },
-        {
-            "Nível": "CONSOLIDAÇÃO",
-            "Descrição": (
-                "Os processos são formalmente documentados e seguidos de maneira estruturada. Existe uma clareza maior sobre as responsabilidades "
-                "e papéis, o que reduz a dependência do conhecimento individual. A implementação de controles internos começa a ganhar robustez, "
-                "permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas. Indicadores de desempenho são introduzidos, permitindo "
-                "um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento."
-            )
-        },
-        {
-            "Nível": "OTIMIZAÇÃO",
-            "Descrição": (
-                "Os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho. "
-                "A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades. "
-                "A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional. "
-                "O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo."
-            )
-        },
-        {
-            "Nível": "EXCELÊNCIA",
-            "Descrição": (
-                "A organização alcança um nível de referência, caracterizado por uma cultura de melhoria contínua e inovação. Os processos são constantemente "
-                "avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico. Há uma integração "
-                "plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório. "
-                "O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor."
-            )
-        }
-    ]
-    # Adicionar uma coluna para destacar o nível atual
-    for nivel in niveis:
-        nivel["Atual"] = "✔️" if nivel["Nível"] == nivel_atual else ""
-
-    # Ajustar estilo da tabela para a coluna "Nível"
-    df_niveis = pd.DataFrame(niveis)
-    df_niveis = df_niveis.reset_index(drop=True)  # Remove a coluna de índice padrão (0, 1, 2, 3, 4)
-    styled_table = df_niveis.style.set_properties(
-        **{'font-size': '10px', 'white-space': 'nowrap'}, subset=['Nível']
-    )
-
-    st.write("### Tilha de Níveis de Maturidade")
-    st.table(styled_table)
-
 def mostrar_nivel_maturidade(total_porcentagem):
     if total_porcentagem < 26:
-        nivel_atual = "INICIAL"
         st.warning("SEU NÍVEL ATUAL É: INICIAL")
         st.info("""
         **NIVEL DE MATURIDADE INICIAL:** 
@@ -231,8 +166,7 @@ def mostrar_nivel_maturidade(total_porcentagem):
         A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
         """)
     elif total_porcentagem < 51:
-        nivel_atual = "ORGANIZAÇÃO"
-        st.warning("SEU NÍVEL ATUAL É: ORGANIZAÇÃO")
+        st.warning("SEU NÍVEL ATUAL É: REPETITIVO")
         st.info("""
         **NIVEL DE MATURIDADE ORGANIZAÇÃO:** 
         A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada. 
@@ -240,8 +174,7 @@ def mostrar_nivel_maturidade(total_porcentagem):
         As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
         """)
     elif total_porcentagem < 71:
-        nivel_atual = "CONSOLIDAÇÃO"
-        st.warning("SEU NÍVEL ATUAL É: CONSOLIDAÇÃO")
+        st.warning("SEU NÍVEL ATUAL É: DEFINIDO")
         st.info("""
         **NIVEL DE MATURIDADE CONSOLIDAÇÃO:** 
         A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada. 
@@ -250,8 +183,7 @@ def mostrar_nivel_maturidade(total_porcentagem):
         Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
         """)
     elif total_porcentagem < 90:
-        nivel_atual = "OTIMIZAÇÃO"
-        st.warning("SEU NÍVEL ATUAL É: OTIMIZAÇÃO")
+        st.warning("SEU NÍVEL ATUAL É: GERENCIADO")
         st.info("""
         **NIVEL DE MATURIDADE OTIMIZAÇÃO:** 
         Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho. 
@@ -260,8 +192,7 @@ def mostrar_nivel_maturidade(total_porcentagem):
         O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
         """)
     elif total_porcentagem >= 91:
-        nivel_atual = "EXCELÊNCIA"
-        st.success("SEU NÍVEL ATUAL É: EXCELÊNCIA")
+        st.success("SEU NÍVEL ATUAL É: OTIMIZADO")
         st.info("""
         **NIVEL DE MATURIDADE EXCELÊNCIA:** 
         A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação. 
@@ -269,13 +200,9 @@ def mostrar_nivel_maturidade(total_porcentagem):
         Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório. 
         O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
         """)
-    
-    # Exibir a tabela de níveis de maturidade com o nível atual destacado
-    exibir_tabela_niveis_maturidade(nivel_atual)
 
 def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
     if valor_percentual < 26:
-        nivel_atual = "INICIAL"
         st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: INICIAL")
         st.info("""
         **NIVEL DE MATURIDADE INICIAL:**
@@ -284,8 +211,7 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
         """)
     elif valor_percentual < 51:
-        nivel_atual = "ORGANIZAÇÃO"
-        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: ORGANIZAÇÃO")
+        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: REPETITIVO")
         st.info("""
         **NIVEL DE MATURIDADE ORGANIZAÇÃO:**
         A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada.
@@ -293,8 +219,7 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
         """)
     elif valor_percentual < 71:
-        nivel_atual = "CONSOLIDAÇÃO"
-        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: CONSOLIDAÇÃO")
+        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: DEFINIDO")
         st.info("""
         **NIVEL DE MATURIDADE CONSOLIDAÇÃO:**
         A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada.
@@ -303,8 +228,7 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
         """)
     elif valor_percentual < 90:
-        nivel_atual = "OTIMIZAÇÃO"
-        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: OTIMIZAÇÃO")
+        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: GERENCIADO")
         st.info("""
         **NIVEL DE MATURIDADE OTIMIZAÇÃO:**
         Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho.
@@ -313,8 +237,7 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
         """)
     elif valor_percentual >= 91:
-        nivel_atual = "EXCELÊNCIA"
-        st.success(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: EXCELÊNCIA")
+        st.success(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: OTIMIZADO")
         st.info("""
         **NIVEL DE MATURIDADE EXCELÊNCIA:**
         A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação.
@@ -322,9 +245,6 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório.
         O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
         """)
-    
-    # Exibir a tabela de níveis de maturidade com o nível atual destacado
-    exibir_tabela_niveis_maturidade(nivel_atual)
 
 def validar_nivel_maturidade(soma_percentual, total_porcentagem):
     if soma_percentual < 26:
@@ -336,7 +256,7 @@ def validar_nivel_maturidade(soma_percentual, total_porcentagem):
         A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
         """)
     elif soma_percentual < 51:
-        st.warning("SEU NÍVEL ATUAL É: ORGANIZAÇÃO")
+        st.warning("SEU NÍVEL ATUAL É: REPETITIVO")
         st.info("""
         **NIVEL DE MATURIDADE ORGANIZAÇÃO:**
         A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada.
@@ -344,7 +264,7 @@ def validar_nivel_maturidade(soma_percentual, total_porcentagem):
         As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
         """)
     elif soma_percentual < 71:
-        st.warning("SEU NÍVEL ATUAL É: CONSOLIDAÇÃO")
+        st.warning("SEU NÍVEL ATUAL É: DEFINIDO")
         st.info("""
         **NIVEL DE MATURIDADE CONSOLIDAÇÃO:**
         A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada.
@@ -353,7 +273,7 @@ def validar_nivel_maturidade(soma_percentual, total_porcentagem):
         Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
         """)
     elif soma_percentual < 90:
-        st.warning("SEU NÍVEL ATUAL É: OTIMIZAÇÃO")
+        st.warning("SEU NÍVEL ATUAL É: GERENCIADO")
         st.info("""
         **NIVEL DE MATURIDADE OTIMIZAÇÃO:**
         Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho.
@@ -362,7 +282,7 @@ def validar_nivel_maturidade(soma_percentual, total_porcentagem):
         O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
         """)
     elif soma_percentual >= 91:
-        st.success("SEU NÍVEL ATUAL É: EXCELÊNCIA")
+        st.success("SEU NÍVEL ATUAL É: OTIMIZADO")
         st.info("""
         **NIVEL DE MATURIDADE EXCELÊNCIA:**
         A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação.
@@ -664,8 +584,17 @@ else:
                     if st.button("Gerar Gráficos"):
                         st.session_state.mostrar_graficos = True
 
-                    # Adicionar botão "EXPORTAR" ao lado do botão "Gerar Gráficos"
-                    if st.session_state.mostrar_graficos:
+                if st.session_state.mostrar_graficos:
+                    fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
+                    
+                    if fig_original and fig_normalizado:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.plotly_chart(fig_original, use_container_width=True)
+                        with col2:
+                            st.plotly_chart(fig_normalizado, use_container_width=True)
+                        
+                        # Adicionar botão "EXPORTAR"
                         if st.button("EXPORTAR"):
                             excel_data = exportar_graficos_e_respostas(
                                 st.session_state.respostas,
@@ -682,16 +611,6 @@ else:
                                 file_name="questionario_e_graficos.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             )
-
-                if st.session_state.mostrar_graficos:
-                    fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
-                    
-                    if fig_original and fig_normalizado:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.plotly_chart(fig_original, use_container_width=True)
-                        with col2:
-                            st.plotly_chart(fig_normalizado, use_container_width=True)
                         
                         # Calcular e exibir o nível atual apenas para o grupo atual
                         grupo_atual = grupos[st.session_state.grupo_atual]
@@ -798,13 +717,13 @@ else:
                                         if total_porcentagem < 26:
                                             st.warning("SEU NIVEL É INICIAL")
                                         elif total_porcentagem < 51:
-                                            st.warning("SEU NIVEL É ORGANIZAÇÃO")
+                                            st.warning("SEU NIVEL É REPETITIVO")
                                         elif total_porcentagem < 71:
-                                            st.warning("SEU NIVEL É CONSOLIDAÇÃO")
+                                            st.warning("SEU NIVEL É DEFINIDO")
                                         elif total_porcentagem < 90:
-                                            st.warning("SEU NIVEL É OTIMIZAÇÃO")
+                                            st.warning("SEU NIVEL É GERENCIADO")
                                         elif total_porcentagem >= 91:
-                                            st.success("SEU NIVEL É EXCELÊNCIA")
+                                            st.success("SEU NIVEL É OTIMIZADO")
                                     with col2:
                                         st.plotly_chart(fig_normalizado, use_container_width=True)
                                         st.write("### Gráfico 2")
@@ -851,3 +770,8 @@ except KeyError as e:
     st.write("Estado atual das respostas:", st.session_state.respostas)
     st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
     st.stop()
+
+# Verificar se todas as perguntas obrigatórias estão presentes no dicionário de respostas
+for pergunta in perguntas_obrigatorias:
+    if pergunta not in st.session_state.respostas:
+        st.session_state.respostas[pergunta] = "Selecione"  # Inicializa com "Selecione"
