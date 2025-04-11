@@ -664,17 +664,8 @@ else:
                     if st.button("Gerar Gráficos"):
                         st.session_state.mostrar_graficos = True
 
-                if st.session_state.mostrar_graficos:
-                    fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
-                    
-                    if fig_original and fig_normalizado:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.plotly_chart(fig_original, use_container_width=True)
-                        with col2:
-                            st.plotly_chart(fig_normalizado, use_container_width=True)
-                        
-                        # Adicionar botão "EXPORTAR"
+                    # Adicionar botão "EXPORTAR" ao lado do botão "Gerar Gráficos"
+                    if st.session_state.mostrar_graficos:
                         if st.button("EXPORTAR"):
                             excel_data = exportar_graficos_e_respostas(
                                 st.session_state.respostas,
@@ -691,6 +682,16 @@ else:
                                 file_name="questionario_e_graficos.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             )
+
+                if st.session_state.mostrar_graficos:
+                    fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
+                    
+                    if fig_original and fig_normalizado:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.plotly_chart(fig_original, use_container_width=True)
+                        with col2:
+                            st.plotly_chart(fig_normalizado, use_container_width=True)
                         
                         # Calcular e exibir o nível atual apenas para o grupo atual
                         grupo_atual = grupos[st.session_state.grupo_atual]
