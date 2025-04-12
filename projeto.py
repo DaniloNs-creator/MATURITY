@@ -104,8 +104,8 @@ def exportar_graficos_e_respostas(respostas, perguntas_hierarquicas, categorias,
 def enviar_email(destinatario, arquivo_excel):
     remetente = st.secrets["credentials"]["email"]
     senha = st.secrets["credentials"]["password"]
-    servidor_smtp = "smtp.kinghost.net"
-    porta = 587
+    servidor_smtp = st.secrets["credentials"][ "servidor_smtp"]
+    porta = st.secrets["credentials"]["porta"]
 
     # Configurar o email
     msg = MIMEMultipart()
