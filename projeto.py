@@ -5,6 +5,11 @@ from io import BytesIO
 import requests
 import plotly.graph_objects as go
 import base64  # Para converter imagens em base64
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 
 st.set_page_config(layout='wide')
 
@@ -70,15 +75,6 @@ def exportar_graficos_e_respostas(respostas, perguntas_hierarquicas, categorias,
     df_grafico = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
     df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
 
-    # Salvar gráficos como imagens usando kaleido
-    img_original = BytesIO()
-    fig_original.write_image(img_original, format="png", engine="kaleido")
-    img_original.seek(0)
-
-    img_normalizado = BytesIO()
-    fig_normalizado.write_image(img_normalizado, format="png", engine="kaleido")
-    img_normalizado.seek(0)
-
     # Criar arquivo Excel
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -86,14 +82,58 @@ def exportar_graficos_e_respostas(respostas, perguntas_hierarquicas, categorias,
         df_grafico.to_excel(writer, index=False, sheet_name='Gráfico')
         df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
 
-        # Adicionar imagens ao Excel
+        # Adicionar imagens ao Excel, se os gráficos forem válidos
         workbook = writer.book
         worksheet = workbook.add_worksheet('Gráficos')
         writer.sheets['Gráficos'] = worksheet
-        worksheet.insert_image('B2', 'grafico_original.png', {'image_data': img_original})
-        worksheet.insert_image('B20', 'grafico_normalizado.png', {'image_data': img_normalizado})
+
+        if fig_original:
+            img_original = BytesIO()
+            fig_original.write_image(img_original, format="png", engine="kaleido")
+            img_original.seek(0)
+            worksheet.insert_image('B2', 'grafico_original.png', {'image_data': img_original})
+
+        if fig_normalizado:
+            img_normalizado = BytesIO()
+            fig_normalizado.write_image(img_normalizado, format="png", engine="kaleido")
+            img_normalizado.seek(0)
+            worksheet.insert_image('B20', 'grafico_normalizado.png', {'image_data': img_normalizado})
 
     return output.getvalue()
+
+def enviar_email(destinatario, arquivo_excel):
+    remetente = st.secrets["credentials"]["email"]
+    senha = st.secrets["credentials"]["password"]
+    servidor_smtp = "smtp.kinghost.net"
+    porta = 587
+
+    # Configurar o email
+    msg = MIMEMultipart()
+    msg['From'] = remetente
+    msg['To'] = destinatario
+    msg['Subject'] = "Relatório de Análise"
+
+    # Corpo do email
+    corpo = "Segue em anexo o relatório de análise gerado pela Matriz de Maturidade."
+    msg.attach(MIMEText(corpo, 'plain'))
+
+    # Anexar o arquivo Excel
+    anexo = MIMEBase('application', 'octet-stream')
+    anexo.set_payload(arquivo_excel)
+    encoders.encode_base64(anexo)
+    anexo.add_header('Content-Disposition', f'attachment; filename="relatorio_analise.xlsx"')
+    msg.attach(anexo)
+
+    # Enviar o email
+    try:
+        with smtplib.SMTP(servidor_smtp, porta) as servidor:
+            servidor.starttls()
+            servidor.login(remetente, senha)
+            servidor.send_message(msg)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao enviar o email: {e}")
+        return False
 
 def gerar_graficos_radar(perguntas_hierarquicas, respostas):
     respostas_numericas = {k: mapeamento_respostas[v] for k, v in respostas.items()}
@@ -380,6 +420,10 @@ if "respostas" not in st.session_state:
 if "mostrar_graficos" not in st.session_state:
     st.session_state.mostrar_graficos = False
 
+# Inicializar as variáveis fig_original e fig_normalizado para evitar erros
+fig_original = None
+fig_normalizado = None
+
 if not st.session_state.formulario_preenchido:
     # Adicionando a imagem no início com tamanho reduzido
     col1, col2 = st.columns([1, 1])
@@ -664,9 +708,9 @@ else:
                     if st.button("Gerar Gráficos"):
                         st.session_state.mostrar_graficos = True
 
-                    # Adicionar botão "EXPORTAR" ao lado do botão "Gerar Gráficos"
+                    # Adicionar botão "ENVIAR POR EMAIL" ao lado do botão "Gerar Gráficos"
                     if st.session_state.mostrar_graficos:
-                        if st.button("EXPORTAR"):
+                        if st.button("ENVIAR POR EMAIL"):
                             excel_data = exportar_graficos_e_respostas(
                                 st.session_state.respostas,
                                 perguntas_hierarquicas,
@@ -676,14 +720,11 @@ else:
                                 fig_original,
                                 fig_normalizado
                             )
-                            st.download_button(
-                                label="Baixar Questionário e Gráficos",
-                                data=excel_data,
-                                file_name="questionario_e_graficos.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            )
+                            if enviar_email(st.session_state.email, excel_data):
+                                st.success("Relatório enviado com sucesso para o email informado!")
 
                 if st.session_state.mostrar_graficos:
+                    # Gerar gráficos antes de utilizá-los
                     fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
                     
                     if fig_original and fig_normalizado:
