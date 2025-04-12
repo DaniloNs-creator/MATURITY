@@ -104,7 +104,7 @@ def exportar_graficos_e_respostas(respostas, perguntas_hierarquicas, categorias,
 def enviar_email(destinatario, arquivo_excel):
     remetente = st.secrets["credentials"]["email"]
     senha = st.secrets["credentials"]["password"]
-    servidor_smtp = st.secrets["credentials"][ "servidor_smtp"]
+    servidor_smtp = st.secrets["credentials"]["servidor_smtp"]
     porta = st.secrets["credentials"]["porta"]
 
     # Configurar o email
@@ -127,12 +127,17 @@ def enviar_email(destinatario, arquivo_excel):
     # Enviar o email
     try:
         with smtplib.SMTP(servidor_smtp, porta) as servidor:
-            servidor.starttls()
+            servidor.ehlo()  # Identifica o cliente para o servidor
+            servidor.starttls()  # Inicia a comunicação segura
+            servidor.ehlo()  # Reidentifica após o STARTTLS
             servidor.login(remetente, senha)
             servidor.send_message(msg)
         return True
-    except Exception as e:
+    except smtplib.SMTPException as e:
         st.error(f"Erro ao enviar o email: {e}")
+        return False
+    except Exception as e:
+        st.error(f"Erro inesperado ao enviar o email: {e}")
         return False
 
 def gerar_graficos_radar(perguntas_hierarquicas, respostas):
