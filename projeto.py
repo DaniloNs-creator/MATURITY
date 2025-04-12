@@ -102,10 +102,10 @@ def exportar_graficos_e_respostas(respostas, perguntas_hierarquicas, categorias,
     return output.getvalue()
 
 def enviar_email(destinatario, arquivo_excel):
-    remetente = st.secrets["credentials"]["email"]
-    senha = st.secrets["credentials"]["password"]
-    servidor_smtp = st.secrets["credentials"]["servidor_smtp"]
-    porta = st.secrets["credentials"]["porta"]
+    remetente = st.secrets["email"]
+    senha = st.secrets["password"]
+    servidor_smtp = st.secrets["servidor_smtp"]
+    porta = st.secrets["porta"]
 
     # Configurar o email
     msg = MIMEMultipart()
