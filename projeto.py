@@ -48,60 +48,20 @@ def calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, respostas):
     valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
     return valor_percentual
 
-def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, valores_normalizados):
+def exportar_questionario(respostas, perguntas_hierarquicas):
+    # Exportar apenas o questionário preenchido
     linhas = []
     for item, conteudo in perguntas_hierarquicas.items():
         for subitem, subpergunta in conteudo["subitens"].items():
             linhas.append({"Pergunta": subpergunta, "Resposta": respostas[subitem]})
 
     df_respostas = pd.DataFrame(linhas)
-    df_grafico = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_respostas.to_excel(writer, index=False, sheet_name='Respostas')
-        df_grafico.to_excel(writer, index=False, sheet_name='Gráfico')
-        df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
+        df_respostas.to_excel(writer, index=False, sheet_name='Questionário')
     return output.getvalue()
 
-def exportar_graficos_e_respostas(respostas, perguntas_hierarquicas, categorias, valores, valores_normalizados, fig_original, fig_normalizado):
-    # Exportar respostas e gráficos para Excel
-    linhas = []
-    for item, conteudo in perguntas_hierarquicas.items():
-        for subitem, subpergunta in conteudo["subitens"].items():
-            linhas.append({"Pergunta": subpergunta, "Resposta": respostas[subitem]})
-
-    df_respostas = pd.DataFrame(linhas)
-    df_grafico = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
-
-    # Criar arquivo Excel
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_respostas.to_excel(writer, index=False, sheet_name='Respostas')
-        df_grafico.to_excel(writer, index=False, sheet_name='Gráfico')
-        df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
-
-        # Adicionar imagens ao Excel, se os gráficos forem válidos
-        workbook = writer.book
-        worksheet = workbook.add_worksheet('Gráficos')
-        writer.sheets['Gráficos'] = worksheet
-
-        if fig_original:
-            img_original = BytesIO()
-            fig_original.write_image(img_original, format="png", engine="kaleido")
-            img_original.seek(0)
-            worksheet.insert_image('B2', 'grafico_original.png', {'image_data': img_original})
-
-        if fig_normalizado:
-            img_normalizado = BytesIO()
-            fig_normalizado.write_image(img_normalizado, format="png", engine="kaleido")
-            img_normalizado.seek(0)
-            worksheet.insert_image('B20', 'grafico_normalizado.png', {'image_data': img_normalizado})
-
-    return output.getvalue()
-
-def enviar_email(destinatario, arquivo_excel):
+def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normalizado):
     remetente = st.secrets["email_config"]["email"]
     senha = st.secrets["email_config"]["password"]
     servidor_smtp = st.secrets["email_config"]["servidor_smtp"]
@@ -113,32 +73,101 @@ def enviar_email(destinatario, arquivo_excel):
     msg['To'] = destinatario
     msg['Subject'] = "Relatório de Análise"
 
-    # Corpo do email
-    corpo = "Segue em anexo o relatório de análise gerado pela Matriz de Maturidade."
-    msg.attach(MIMEText(corpo, 'plain'))
+    # Mensagem de Relatório de Progresso
+    grupo_atual_nome = grupos[st.session_state.grupo_atual]
+    respostas_numericas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
+    soma_respostas = sum(respostas_numericas[subitem] for subitem in perguntas_hierarquicas[grupo_atual_nome]["subitens"].keys())
+    num_perguntas = len(perguntas_hierarquicas[grupo_atual_nome]["subitens"])
+    if num_perguntas > 0:
+        valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+        nivel_atual = ""
+        if valor_percentual < 26:
+            nivel_atual = "INICIAL"
+        elif valor_percentual < 51:
+            nivel_atual = "ORGANIZAÇÃO"
+        elif valor_percentual < 71:
+            nivel_atual = "CONSOLIDAÇÃO"
+        elif valor_percentual < 90:
+            nivel_atual = "OTIMIZAÇÃO"
+        elif valor_percentual >= 91:
+            nivel_atual = "EXCELÊNCIA"
 
-    # Anexar o arquivo Excel
+        # Determinar os próximos blocos
+        proximos_blocos = grupos[st.session_state.grupo_atual + 1:] if st.session_state.grupo_atual + 1 < len(grupos) else []
+        proximos_blocos_texto = ", ".join(proximos_blocos) if proximos_blocos else "Nenhum bloco restante."
+
+        # Corpo do email com gráficos embutidos e mensagem de progresso
+        corpo = f"""
+        <p>Prezado(a) {st.session_state.nome},</p>
+        <p>Segue abaixo os gráficos de radar gerados pela Matriz de Maturidade:</p>
+        <p><b>Gráfico de Radar - Nível Atual:</b></p>
+        <img src="cid:fig_original" alt="Gráfico Original" style="width:600px;">
+        <p><b>Gráfico de Radar - Normalizado:</b></p>
+        <img src="cid:fig_normalizado" alt="Gráfico Normalizado" style="width:600px;">
+        <p>Em anexo, você encontrará o questionário preenchido.</p>
+        <hr>
+        <h3>Relatório de Progresso</h3>
+        <p>Você completou o Bloco <b>{grupo_atual_nome}</b>. Os resultados indicam que o seu nível de maturidade neste bloco é classificado como: <b>{nivel_atual}</b>.</p>
+        <p>Para aprofundarmos a análise e oferecermos insights mais estratégicos, recomendamos que você complete também:</p>
+        <p><b>{proximos_blocos_texto}</b></p>
+        <p>Nossos consultores especializados receberão este relatório e entrarão em contato para agendar uma discussão personalizada. Juntos, identificaremos oportunidades de melhoria e traçaremos os próximos passos para otimizar os processos da sua organização.</p>
+        """
+        msg.attach(MIMEText(corpo, 'html'))
+
+    # Anexar o arquivo do questionário
     anexo = MIMEBase('application', 'octet-stream')
-    anexo.set_payload(arquivo_excel)
+    anexo.set_payload(arquivo_questionario)
     encoders.encode_base64(anexo)
-    anexo.add_header('Content-Disposition', f'attachment; filename="relatorio_analise.xlsx"')
+    anexo.add_header('Content-Disposition', f'attachment; filename="questionario_preenchido.xlsx"')
     msg.attach(anexo)
+
+    # Adicionar gráficos como imagens embutidas
+    try:
+        if fig_original is not None:
+            img_original = BytesIO()
+            fig_original.write_image(img_original, format="png", engine="kaleido")
+            img_original.seek(0)
+            img_original_mime = MIMEBase('image', 'png', filename="grafico_original.png")
+            img_original_mime.set_payload(img_original.read())
+            encoders.encode_base64(img_original_mime)
+            img_original_mime.add_header('Content-ID', '<fig_original>')
+            img_original_mime.add_header('Content-Disposition', 'inline', filename="grafico_original.png")
+            msg.attach(img_original_mime)
+        else:
+            raise ValueError("Gráfico Original não foi gerado.")
+
+        if fig_normalizado is not None:
+            img_normalizado = BytesIO()
+            fig_normalizado.write_image(img_normalizado, format="png", engine="kaleido")
+            img_normalizado.seek(0)
+            img_normalizado_mime = MIMEBase('image', 'png', filename="grafico_normalizado.png")
+            img_normalizado_mime.set_payload(img_normalizado.read())
+            encoders.encode_base64(img_normalizado_mime)
+            img_normalizado_mime.add_header('Content-ID', '<fig_normalizado>')
+            img_normalizado_mime.add_header('Content-Disposition', 'inline', filename="grafico_normalizado.png")
+            msg.attach(img_normalizado_mime)
+        else:
+            raise ValueError("Gráfico Normalizado não foi gerado.")
+    except Exception as e:
+        st.error(f"Erro ao gerar imagens dos gráficos: {e}")
+        return False
 
     # Enviar o email
     try:
-        with smtplib.SMTP(servidor_smtp, porta) as servidor:
-            servidor.ehlo()  # Identifica o cliente para o servidor
-            servidor.starttls()  # Inicia a comunicação segura
-            servidor.ehlo()  # Reidentifica após o STARTTLS
+        with smtplib.SMTP(servidor_smtp, porta, timeout=10) as servidor:
+            servidor.starttls()
             servidor.login(remetente, senha)
             servidor.send_message(msg)
         return True
+    except smtplib.SMTPConnectError:
+        st.error("Erro ao conectar ao servidor SMTP. Verifique as configurações do servidor.")
+    except smtplib.SMTPAuthenticationError:
+        st.error("Erro de autenticação. Verifique o email e a senha fornecidos.")
     except smtplib.SMTPException as e:
         st.error(f"Erro ao enviar o email: {e}")
-        return False
     except Exception as e:
-        st.error(f"Erro inesperado ao enviar o email: {e}")
-        return False
+        st.error(f"Erro inesperado: {e}")
+    return False
 
 def gerar_graficos_radar(perguntas_hierarquicas, respostas):
     respostas_numericas = {k: mapeamento_respostas[v] for k, v in respostas.items()}
@@ -715,38 +744,63 @@ else:
 
                     # Adicionar botão "ENVIAR POR EMAIL" ao lado do botão "Gerar Gráficos"
                     if st.session_state.mostrar_graficos:
-                        if st.button("ENVIAR POR EMAIL"):
-                            excel_data = exportar_graficos_e_respostas(
-                                st.session_state.respostas,
-                                perguntas_hierarquicas,
-                                categorias[:-1],
-                                valores[:-1],
-                                valores_normalizados[:-1],
-                                fig_original,
-                                fig_normalizado
-                            )
-                            if enviar_email(st.session_state.email, excel_data):
-                                st.success("Relatório enviado com sucesso para o email informado!")
+                        fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
+                        if fig_original is None or fig_normalizado is None:
+                            st.error("Os gráficos não foram gerados corretamente. Verifique os dados de entrada.")
+                        else:
+                            if st.button("ENVIAR POR EMAIL"):
+                                excel_data = exportar_questionario(st.session_state.respostas, perguntas_hierarquicas)
+                                if enviar_email(st.session_state.email, excel_data, fig_original, fig_normalizado):
+                                    st.success("Relatório enviado com sucesso para o email informado!")
 
                 if st.session_state.mostrar_graficos:
-                    # Gerar gráficos antes de utilizá-los
+                    # Mensagem de Relatório de Progresso
+                    grupo_atual_nome = grupos[st.session_state.grupo_atual]
+                    respostas_numericas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
+                    soma_respostas = sum(respostas_numericas[subitem] for subitem in perguntas_hierarquicas[grupo_atual_nome]["subitens"].keys())
+                    num_perguntas = len(perguntas_hierarquicas[grupo_atual_nome]["subitens"])
+                    if num_perguntas > 0:
+                        valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+                        nivel_atual = ""
+                        if valor_percentual < 26:
+                            nivel_atual = "INICIAL"
+                        elif valor_percentual < 51:
+                            nivel_atual = "ORGANIZAÇÃO"
+                        elif valor_percentual < 71:
+                            nivel_atual = "CONSOLIDAÇÃO"
+                        elif valor_percentual < 90:
+                            nivel_atual = "OTIMIZAÇÃO"
+                        elif valor_percentual >= 91:
+                            nivel_atual = "EXCELÊNCIA"
+
+                        # Determinar os próximos blocos
+                        proximos_blocos = grupos[st.session_state.grupo_atual + 1:] if st.session_state.grupo_atual + 1 < len(grupos) else []
+                        proximos_blocos_texto = ", ".join(proximos_blocos) if proximos_blocos else "Nenhum bloco restante."
+
+                        # Exibir a mensagem
+                        st.markdown(f"""
+                        ### Relatório de Progresso
+
+                        Você completou o Bloco **{grupo_atual_nome}**. Os resultados indicam que o seu nível de maturidade neste bloco é classificado como: **{nivel_atual}**.
+
+                        Para aprofundarmos a análise e oferecermos insights mais estratégicos, recomendamos que você complete também:
+
+                        **{proximos_blocos_texto}**
+
+                        Nossos consultores especializados receberão este relatório e entrarão em contato para agendar uma discussão personalizada. Juntos, identificaremos oportunidades de melhoria e traçaremos os próximos passos para otimizar os processos da sua organização.
+                        """)
+
+                    # Gerar gráficos
                     fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
-                    
                     if fig_original and fig_normalizado:
                         col1, col2 = st.columns(2)
                         with col1:
                             st.plotly_chart(fig_original, use_container_width=True)
                         with col2:
                             st.plotly_chart(fig_normalizado, use_container_width=True)
-                        
+
                         # Calcular e exibir o nível atual apenas para o grupo atual
-                        grupo_atual = grupos[st.session_state.grupo_atual]
-                        respostas_numericas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
-                        soma_respostas = sum(respostas_numericas[subitem] for subitem in perguntas_hierarquicas[grupo_atual]["subitens"].keys())
-                        num_perguntas = len(perguntas_hierarquicas[grupo_atual]["subitens"])
-                        if num_perguntas > 0:
-                            valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-                            mostrar_nivel_atual_por_grupo(grupo_atual, valor_percentual)
+                        mostrar_nivel_atual_por_grupo(grupo_atual_nome, valor_percentual)
             else:
                 st.write("### Todas as perguntas foram respondidas!")
                 if st.button("Gerar Gráfico Final"):
@@ -860,11 +914,11 @@ else:
                                     # Mostrar nível de maturidade completo
                                     mostrar_nivel_maturidade(total_porcentagem)
                                     
-                                    excel_data = exportar_para_excel_completo(st.session_state.respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
+                                    excel_data = exportar_questionario(st.session_state.respostas, perguntas_hierarquicas)
                                     st.download_button(
                                         label="Exportar para Excel",
                                         data=excel_data,
-                                        file_name="respostas_e_grafico.xlsx",
+                                        file_name="questionario_preenchido.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     )
                         except KeyError as e:
@@ -896,4 +950,3 @@ except KeyError as e:
     st.error(f"Erro ao acessar chave inexistente: {e}")
     st.write("Estado atual das respostas:", st.session_state.respostas)
     st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
-    st.stop()
