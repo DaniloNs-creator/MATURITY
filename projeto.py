@@ -62,10 +62,10 @@ def exportar_questionario(respostas, perguntas_hierarquicas):
     return output.getvalue()
 
 def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normalizado):
-    remetente = st.secrets["email_config"]["email"]
-    senha = st.secrets["email_config"]["password"]
-    servidor_smtp = st.secrets["email_config"]["servidor_smtp"]
-    porta = st.secrets["email_config"]["porta"]
+    servidor_smtp = "smtp.kinghost.net"
+    porta = 587
+    remetente = "profile@realiconsultoria.com.br"
+    senha = "Reali@2021"
 
     # Configurar o email
     msg = MIMEMultipart()
@@ -154,7 +154,7 @@ def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normaliza
 
     # Enviar o email
     try:
-        with smtplib.SMTP(servidor_smtp, porta, timeout=10) as servidor:
+        with smtplib.SMTP(host=servidor_smtp, port=porta, local_hostname="localhost") as servidor:
             servidor.starttls()
             servidor.login(remetente, senha)
             servidor.send_message(msg)
