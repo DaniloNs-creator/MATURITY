@@ -178,3 +178,4 @@ secrets.toml
 .streamlit/
 *.env
 config.json
+.streamlit/secrets.toml
