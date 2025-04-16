@@ -16,11 +16,11 @@ st.set_page_config(layout='wide')
 # Mapeamento das respostas de texto para valores numéricos
 mapeamento_respostas = {
     "Selecione": 0,  # Adicionando "Selecione" como valor padrão
-    "Não iniciado": 1,
-    "Inicial": 2,
-    "Em andamento": 3,
-    "Avançado": 4,
-    "Completamente implementado": 5
+    "Não Possui": 1,
+    "Insatisfatório": 2,
+    "Controlado": 3,
+    "Eficiente": 4,
+    "Otimizado": 5
 }
 
 # Verificar se o pacote kaleido está instalado
@@ -463,8 +463,8 @@ if not st.session_state.formulario_preenchido:
     col1, col2 = st.columns([1, 1])
     with col1:
         st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png", width=300)
-        st.title("MATRIZ DE MATURIDADE DE COMPLIANCE E PROCESSOS")
-        st.subheader("Por favor, preencha suas informações antes de prosseguir")
+        st.header("DIAGNÓSTICO DE GESTÃO, GOVERNANÇA E CONTROLES")  # Título ajustado para menor tamanho
+        st.subheader("Por favor, preencha suas informações abaixo:")
         nome = st.text_input("Nome")
         email = st.text_input("E-mail")
         empresa = st.text_input("Empresa")
@@ -479,6 +479,29 @@ if not st.session_state.formulario_preenchido:
                 st.success("Informações preenchidas com sucesso! Você pode prosseguir para o questionário.")
             else:
                 st.error("Por favor, preencha todos os campos antes de prosseguir.")
+
+            # Adicionar explicação em formato de tópicos abaixo do botão "Prosseguir"
+            st.markdown("""
+            Com esta ferramenta de diagnóstico, você poderá avaliar o nível de maturidade da sua empresa em três dimensões estratégicas:
+            - **Gestão**:
+                - Estrutura organizacional
+                - Eficiência financeira
+            - **Governança**:
+                - Gestão de processos
+                - Gestão de riscos
+                - Conformidade regulatória (compliance)
+                - Efetividade do canal de denúncias
+            - **Áreas Operacionais**:
+                - Recursos Humanos
+                - Tecnologia da Informação
+                - Gestão de compras e estoques
+                - Contabilidade e controles financeiros
+                - Logística e distribuição
+            """)
+            st.markdown("""
+            A análise integrada desses aspectos permitirá identificar pontos fortes, oportunidades de melhoria e priorizar ações para o crescimento sustentável do negócio.
+            """)
+            
     with col2:
         st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/foto.jpg", use_container_width=True)
 else:
@@ -533,17 +556,17 @@ else:
                 st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png")
                 st.title("Navegação por Grupos")
                 
-                tab1, tab2, tab3, tab4 = st.tabs(["FINANCEIRA", "GESTÃO", "GOVERNANÇA", "SETORES"])
+                tab1, tab2, tab3 = st.tabs([ "GESTÃO", "GOVERNANÇA", "SETORES"])
+                
+                
                 
                 with tab1:
+                    if st.button("**Estruturas**" if st.session_state.grupo_atual == 1 else "Estruturas"):
+                        st.session_state.grupo_atual = 1
                     if st.button("**Eficiência de Gestão**" if st.session_state.grupo_atual == 0 else "Eficiência de Gestão"):
                         st.session_state.grupo_atual = 0
                 
                 with tab2:
-                    if st.button("**Estruturas**" if st.session_state.grupo_atual == 1 else "Estruturas"):
-                        st.session_state.grupo_atual = 1
-                
-                with tab3:
                     if st.button("**Gestão de Processos**" if st.session_state.grupo_atual == 2 else "Gestão de Processos"):
                         st.session_state.grupo_atual = 2
                     if st.button("**Gestão de Riscos**" if st.session_state.grupo_atual == 3 else "Gestão de Riscos"):
@@ -555,7 +578,7 @@ else:
                     if st.button("**Governança Corporativa**" if st.session_state.grupo_atual == 6 else "Governança Corporativa"):
                         st.session_state.grupo_atual = 6
                 
-                with tab4:
+                with tab3:
                     if st.button("**Recursos Humanos**" if st.session_state.grupo_atual == 7 else "Recursos Humanos"):
                         st.session_state.grupo_atual = 7
                     if st.button("**Tecnologia da Informação**" if st.session_state.grupo_atual == 8 else "Tecnologia da Informação"):
@@ -568,6 +591,14 @@ else:
                         st.session_state.grupo_atual = 11
                     if st.button("**Logística e Distribuição**" if st.session_state.grupo_atual == 12 else "Logística e Distribuição"):
                         st.session_state.grupo_atual = 12
+
+                # Adicionar texto explicativo abaixo dos botões
+                st.write("""
+                Para garantir uma análise mais eficiente e resultados mais assertivos, recomendamos iniciar o diagnóstico pela aba 'Gestão', respondendo aos dois blocos de questões relacionados. 
+                Em seguida, prossiga para 'Governança' e, por fim, 'Setores'. 
+
+                No entanto, caso prefira, você pode navegar diretamente para qualquer aba específica de acordo com suas prioridades ou áreas de interesse imediato.
+                """)
 
             grupo_atual = st.session_state.grupo_atual
 
