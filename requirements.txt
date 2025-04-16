@@ -6,3 +6,5 @@ kaleido==0.2.1
 openpyxl==3.1.2
 requests==2.31.0
 python-dotenv==1.0.0
+xlsxwriter>=3.1.0
+matplotlib==3.8.2
