@@ -173,6 +173,8 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Arquivos específicos do projeto
 secrets.toml
-__pycache__/
-.env
+.streamlit/
+*.env
+config.json
