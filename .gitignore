@@ -179,3 +179,11 @@ secrets.toml
 *.env
 config.json
 .streamlit/secrets.toml
+# Na seção de Environments
+.env
+.venv/
+.secrets.toml  # Adicione esta linha se não existir
+
+# Na seção específica que você forneceu
+secrets.toml
+.streamlit/  # Isso garante que a pasta não será commitada
