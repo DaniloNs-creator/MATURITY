@@ -10,6 +10,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+import json  # Para salvar e carregar dados em formato JSON
 
 st.set_page_config(layout='wide')
 
@@ -29,6 +30,29 @@ try:
 except ImportError:
     st.error("O pacote 'kaleido' é necessário para exportar gráficos como imagens. Por favor, instale-o executando: pip install -U kaleido")
     st.stop()
+
+# Função para salvar respostas no arquivo
+def salvar_respostas(nome, email, respostas):
+    try:
+        dados = {"nome": nome, "email": email, "respostas": respostas}
+        with open(f"respostas_{email}.json", "w") as arquivo:
+            json.dump(dados, arquivo)
+        st.success("Respostas salvas com sucesso! Você pode continuar mais tarde.")
+    except Exception as e:
+        st.error(f"Erro ao salvar respostas: {e}")
+
+# Função para carregar respostas do arquivo
+def carregar_respostas(email):
+    try:
+        with open(f"respostas_{email}.json", "r") as arquivo:
+            dados = json.load(arquivo)
+        return dados.get("respostas", {})
+    except FileNotFoundError:
+        st.warning("Nenhum progresso salvo encontrado para este e-mail.")
+        return {}
+    except Exception as e:
+        st.error(f"Erro ao carregar respostas: {e}")
+        return {}
 
 # Função para verificar se todas as perguntas obrigatórias foram respondidas
 def verificar_obrigatorias_preenchidas(grupo, perguntas_hierarquicas, perguntas_obrigatorias, respostas):
@@ -476,6 +500,9 @@ if not st.session_state.formulario_preenchido:
                 st.session_state.empresa = empresa
                 st.session_state.telefone = telefone
                 st.session_state.formulario_preenchido = True
+
+                # Carregar respostas salvas, se existirem
+                st.session_state.respostas = carregar_respostas(email)
                 st.success("Informações preenchidas com sucesso! Você pode prosseguir para o questionário.")
             else:
                 st.error("Por favor, preencha todos os campos antes de prosseguir.")
@@ -770,6 +797,8 @@ else:
                             st.session_state.mostrar_graficos = False
                             st.success("Você avançou para o próximo grupo.")
                 with col3:
+                    if st.button("Salvar Progresso"):
+                        salvar_respostas(st.session_state.nome, st.session_state.email, st.session_state.respostas)
                     if st.button("Gerar Gráficos"):
                         st.session_state.mostrar_graficos = True
 
