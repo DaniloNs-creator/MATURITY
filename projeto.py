@@ -176,22 +176,17 @@ def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normaliza
         st.error(f"Erro ao gerar imagens dos gráficos: {e}")
         return False
 
-    # Enviar o email
+    # Enviar o email com depuração detalhada
     try:
-        with smtplib.SMTP(host=servidor_smtp, port=porta, local_hostname="localhost") as servidor:
+        with smtplib.SMTP(host=servidor_smtp, port=porta, timeout=10) as servidor:
+            servidor.set_debuglevel(1)  # Ativa logs detalhados
             servidor.starttls()
             servidor.login(remetente, senha)
             servidor.send_message(msg)
         return True
-    except smtplib.SMTPConnectError:
-        st.error("Erro ao conectar ao servidor SMTP. Verifique as configurações do servidor.")
-    except smtplib.SMTPAuthenticationError:
-        st.error("Erro de autenticação. Verifique o email e a senha fornecidos.")
-    except smtplib.SMTPException as e:
-        st.error(f"Erro ao enviar o email: {e}")
     except Exception as e:
-        st.error(f"Erro inesperado: {e}")
-    return False
+        st.error(f"Erro detalhado: {str(e)}")
+        return False
 
 def gerar_graficos_radar(perguntas_hierarquicas, respostas):
     respostas_numericas = {k: mapeamento_respostas[v] for k, v in respostas.items()}
