@@ -1,14 +1,15 @@
 import streamlit as st
-import pandas as pd
-from lxml import etree
-import os
+import xml.etree.ElementTree as ET
 from datetime import datetime
+import pandas as pd
+import os
 import base64
-import zipfile
-import io
 from io import BytesIO
+import zipfile
 import tempfile
-import plotly.express as px
+from collections import defaultdict
+import cssutils
+import re
 
 # Configuração inicial da página
 st.set_page_config(
@@ -19,199 +20,585 @@ st.set_page_config(
 )
 
 # CSS personalizado
-st.markdown("""
-<style>
-    /* Estilos gerais */
-    .main {
-        background-color: #f8f9fa;
-    }
-    .stApp {
-        background-color: white;
-    }
-    .reportview-container {
-        background-color: white;
-    }
-    
-    /* Estilos dos botões */
-    .stButton>button {
-        border-radius: 8px;
-        border: 1px solid #ced4da;
-        background-color: #f8f9fa;
-        color: #495057;
-        font-weight: 500;
-        padding: 0.5rem 1rem;
-        margin: 0.2rem;
-    }
-    .stButton>button:hover {
-        background-color: #e9ecef;
-        color: #212529;
-        border-color: #adb5bd;
-    }
-    
-    /* Estilos das abas */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 40px;
-        padding: 0 20px;
-        border-radius: 8px 8px 0 0;
-        background-color: #e9ecef;
-        color: #495057;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #0d6efd;
-        color: white;
-    }
-    
-    /* Estilos dos cards */
-    .card {
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        background-color: white;
-        border: 1px solid #dee2e6;
-    }
-    .card-title {
-        font-size: 1.25rem;
-        font-weight: 600;
-        margin-bottom: 1rem;
-        color: #0d6efd;
-    }
-    
-    /* Estilos da sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #f8f9fa;
-    }
-    
-    /* Estilos da tabela */
-    table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-    th {
-        background-color: #0d6efd;
-        color: white;
-        padding: 10px;
-        text-align: left;
-    }
-    td {
-        padding: 8px 10px;
-        border-bottom: 1px solid #dee2e6;
-    }
-    tr:nth-child(even) {
-        background-color: #f8f9fa;
-    }
-    
-    /* Estilos do cabeçalho */
-    .header {
-        background-color: #0d6efd;
-        color: white;
-        padding: 1.5rem;
-        border-radius: 8px;
-        margin-bottom: 2rem;
-    }
-    .header-title {
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-    }
-    .header-subtitle {
-        font-size: 1.1rem;
-        opacity: 0.9;
-    }
-</style>
-""", unsafe_allow_html=True)
+def local_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
-# Funções para processamento dos XMLs
-def parse_xml(xml_file):
-    try:
-        tree = etree.parse(xml_file)
-        root = tree.getroot()
-        
-        # Namespaces
-        ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
-        
-        # Dados básicos da NFe
-        inf_nfe = root.find('.//nfe:infNFe', ns)
-        ide = inf_nfe.find('nfe:ide', ns)
-        emit = inf_nfe.find('nfe:emit', ns)
-        dest = inf_nfe.find('nfe:dest', ns)
-        total = inf_nfe.find('nfe:total', ns)
-        
-        # Informações da nota
-        nfe_data = {
-            'chave': inf_nfe.get('Id')[3:],  # Remove 'NFe' do início
-            'numero': ide.find('nfe:nNF', ns).text,
-            'serie': ide.find('nfe:serie', ns).text,
-            'data_emissao': ide.find('nfe:dhEmi', ns).text,
-            'emitente_cnpj': emit.find('nfe:CNPJ', ns).text if emit.find('nfe:CNPJ', ns) is not None else emit.find('nfe:CPF', ns).text,
-            'emitente_nome': emit.find('nfe:xNome', ns).text,
-            'destinatario_cnpj': dest.find('nfe:CNPJ', ns).text if dest.find('nfe:CNPJ', ns) is not None else dest.find('nfe:CPF', ns).text,
-            'destinatario_nome': dest.find('nfe:xNome', ns).text,
-            'valor_total': float(total.find('nfe:ICMSTot/nfe:vNF', ns).text)
+# Criar arquivo CSS se não existir
+if not os.path.exists("style.css"):
+    with open("style.css", "w") as f:
+        f.write("""
+        /* Estilos gerais */
+        body {
+            font-family: 'Arial', sans-serif;
+            color: #333;
         }
         
-        # Itens da NFe
-        itens = []
-        for det in inf_nfe.findall('nfe:det', ns):
-            item = det.find('nfe:prod', ns)
-            imposto = det.find('nfe:imposto', ns)
-            
-            # ICMS
-            icms = imposto.find('nfe:ICMS/*', ns) if imposto.find('nfe:ICMS', ns) is not None else None
-            
-            # IPI
-            ipi = imposto.find('nfe:IPI/nfe:IPITrib', ns) if imposto.find('nfe:IPI', ns) is not None else None
-            
-            # PIS
-            pis = imposto.find('nfe:PIS/*', ns) if imposto.find('nfe:PIS', ns) is not None else None
-            
-            # COFINS
-            cofins = imposto.find('nfe:COFINS/*', ns) if imposto.find('nfe:COFINS', ns) is not None else None
-            
-            item_data = {
-                'numero_item': det.get('nItem'),
-                'codigo': item.find('nfe:cProd', ns).text,
-                'descricao': item.find('nfe:xProd', ns).text,
-                'ncm': item.find('nfe:NCM', ns).text,
-                'cfop': item.find('nfe:CFOP', ns).text,
-                'unidade': item.find('nfe:uCom', ns).text,
-                'quantidade': float(item.find('nfe:qCom', ns).text),
-                'valor_unitario': float(item.find('nfe:vUnCom', ns).text),
-                'valor_total': float(item.find('nfe:vProd', ns).text),
-                'icms_orig': icms.find('nfe:orig', ns).text if icms is not None else None,
-                'icms_cst': icms.find('nfe:CST', ns).text if icms is not None and icms.find('nfe:CST', ns) is not None else icms.find('nfe:CSOSN', ns).text if icms is not None else None,
-                'icms_bc': float(icms.find('nfe:vBC', ns).text) if icms is not None and icms.find('nfe:vBC', ns) is not None else 0.0,
-                'icms_p': float(icms.find('nfe:pICMS', ns).text) if icms is not None and icms.find('nfe:pICMS', ns) is not None else 0.0,
-                'icms_v': float(icms.find('nfe:vICMS', ns).text) if icms is not None and icms.find('nfe:vICMS', ns) is not None else 0.0,
-                'icms_bc_st': float(icms.find('nfe:vBCST', ns).text) if icms is not None and icms.find('nfe:vBCST', ns) is not None else 0.0,
-                'icms_p_st': float(icms.find('nfe:pICMSST', ns).text) if icms is not None and icms.find('nfe:pICMSST', ns) is not None else 0.0,
-                'icms_v_st': float(icms.find('nfe:vICMSST', ns).text) if icms is not None and icms.find('nfe:vICMSST', ns) is not None else 0.0,
-                'ipi_cst': ipi.find('nfe:CST', ns).text if ipi is not None else None,
-                'ipi_bc': float(ipi.find('nfe:vBC', ns).text) if ipi is not None and ipi.find('nfe:vBC', ns) is not None else 0.0,
-                'ipi_p': float(ipi.find('nfe:pIPI', ns).text) if ipi is not None and ipi.find('nfe:pIPI', ns) is not None else 0.0,
-                'ipi_v': float(ipi.find('nfe:vIPI', ns).text) if ipi is not None and ipi.find('nfe:vIPI', ns) is not None else 0.0,
-                'pis_cst': pis.find('nfe:CST', ns).text if pis is not None else None,
-                'pis_bc': float(pis.find('nfe:vBC', ns).text) if pis is not None and pis.find('nfe:vBC', ns) is not None else 0.0,
-                'pis_p': float(pis.find('nfe:pPIS', ns).text) if pis is not None and pis.find('nfe:pPIS', ns) is not None else 0.0,
-                'pis_v': float(pis.find('nfe:vPIS', ns).text) if pis is not None and pis.find('nfe:vPIS', ns) is not None else 0.0,
-                'cofins_cst': cofins.find('nfe:CST', ns).text if cofins is not None else None,
-                'cofins_bc': float(cofins.find('nfe:vBC', ns).text) if cofins is not None and cofins.find('nfe:vBC', ns) is not None else 0.0,
-                'cofins_p': float(cofins.find('nfe:pCOFINS', ns).text) if cofins is not None and cofins.find('nfe:pCOFINS', ns) is not None else 0.0,
-                'cofins_v': float(cofins.find('nfe:vCOFINS', ns).text) if cofins is not None and cofins.find('nfe:vCOFINS', ns) is not None else 0.0
-            }
-            itens.append(item_data)
+        /* Cabeçalho */
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
         
-        return {'nfe': nfe_data, 'itens': itens}
-    except Exception as e:
-        st.error(f"Erro ao processar o arquivo XML: {str(e)}")
+        /* Botões de navegação */
+        .nav-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            margin: 0.2rem;
+            border-radius: 0.3rem;
+            cursor: pointer;
+            width: 100%;
+            text-align: left;
+        }
+        
+        .nav-button:hover {
+            background-color: #2980b9;
+        }
+        
+        .nav-button.active {
+            background-color: #2c3e50;
+            font-weight: bold;
+        }
+        
+        /* Cards de informações */
+        .info-card {
+            background-color: #f8f9fa;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Tabelas */
+        .dataframe {
+            width: 100%;
+        }
+        
+        /* Inputs */
+        .stTextInput>div>div>input {
+            border-radius: 0.3rem;
+            padding: 0.5rem;
+        }
+        
+        /* Mensagens de sucesso */
+        .success-message {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        
+        /* Mensagens de erro */
+        .error-message {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        """)
+
+local_css("style.css")
+
+# Namespaces XML
+ns = {
+    'nfe': 'http://www.portalfiscal.inf.br/nfe',
+    'ds': 'http://www.w3.org/2000/09/xmldsig#'
+}
+
+# Classes para armazenamento de dados
+class NotaFiscal:
+    def __init__(self, xml_path):
+        self.xml_path = xml_path
+        self.tree = ET.parse(xml_path)
+        self.root = self.tree.getroot()
+        self.chave = self._extrair_chave()
+        self.emitente = self._extrair_emitente()
+        self.destinatario = self._extrair_destinatario()
+        self.data_emissao = self._extrair_data_emissao()
+        self.valor_total = self._extrair_valor_total()
+        self.itens = self._extrair_itens()
+        self.tipo_operacao = self._extrair_tipo_operacao()
+        self.icms = self._extrair_icms()
+        self.ipi = self._extrair_ipi()
+        self.pis = self._extrair_pis()
+        self.cofins = self._extrair_cofins()
+
+    def _extrair_chave(self):
+        inf_nfe = self.root.find('.//nfe:infNFe', ns)
+        if inf_nfe is not None:
+            return inf_nfe.attrib.get('Id')[3:]  # Remove 'NFe' do início
         return None
 
-def processar_arquivos(uploaded_files):
-    notas_fiscais = []
-    itens_notas = []
+    def _extrair_emitente(self):
+        emit = self.root.find('.//nfe:emit', ns)
+        if emit is not None:
+            return {
+                'cnpj': emit.find('nfe:CNPJ', ns).text if emit.find('nfe:CNPJ', ns) is not None else None,
+                'nome': emit.find('nfe:xNome', ns).text if emit.find('nfe:xNome', ns) is not None else None
+            }
+        return None
+
+    def _extrair_destinatario(self):
+        dest = self.root.find('.//nfe:dest', ns)
+        if dest is not None:
+            return {
+                'cnpj': dest.find('nfe:CNPJ', ns).text if dest.find('nfe:CNPJ', ns) is not None else None,
+                'nome': dest.find('nfe:xNome', ns).text if dest.find('nfe:xNome', ns) is not None else None
+            }
+        return None
+
+    def _extrair_data_emissao(self):
+        ide = self.root.find('.//nfe:ide', ns)
+        if ide is not None:
+            dh_emissao = ide.find('nfe:dhEmi', ns)
+            if dh_emissao is not None:
+                return datetime.strptime(dh_emissao.text, '%Y-%m-%dT%H:%M:%S%z')
+            
+            d_emissao = ide.find('nfe:dEmi', ns)
+            if d_emissao is not None:
+                return datetime.strptime(d_emissao.text, '%Y-%m-%d')
+        return None
+
+    def _extrair_valor_total(self):
+        total = self.root.find('.//nfe:total/nfe:ICMSTot', ns)
+        if total is not None:
+            return {
+                'vProd': float(total.find('nfe:vProd', ns).text) if total.find('nfe:vProd', ns) is not None else 0.0,
+                'vNF': float(total.find('nfe:vNF', ns).text) if total.find('nfe:vNF', ns) is not None else 0.0,
+                'vICMS': float(total.find('nfe:vICMS', ns).text) if total.find('nfe:vICMS', ns) is not None else 0.0,
+                'vST': float(total.find('nfe:vST', ns).text) if total.find('nfe:vST', ns) is not None else 0.0,
+                'vIPI': float(total.find('nfe:vIPI', ns).text) if total.find('nfe:vIPI', ns) is not None else 0.0,
+                'vPIS': float(total.find('nfe:vPIS', ns).text) if total.find('nfe:vPIS', ns) is not None else 0.0,
+                'vCOFINS': float(total.find('nfe:vCOFINS', ns).text) if total.find('nfe:vCOFINS', ns) is not None else 0.0
+            }
+        return None
+
+    def _extrair_itens(self):
+        itens = []
+        dets = self.root.findall('.//nfe:det', ns)
+        for det in dets:
+            prod = det.find('nfe:prod', ns)
+            imposto = det.find('nfe:imposto', ns)
+            
+            item = {
+                'nItem': det.attrib.get('nItem'),
+                'cProd': prod.find('nfe:cProd', ns).text if prod.find('nfe:cProd', ns) is not None else None,
+                'xProd': prod.find('nfe:xProd', ns).text if prod.find('nfe:xProd', ns) is not None else None,
+                'NCM': prod.find('nfe:NCM', ns).text if prod.find('nfe:NCM', ns) is not None else None,
+                'CFOP': prod.find('nfe:CFOP', ns).text if prod.find('nfe:CFOP', ns) is not None else None,
+                'uCom': prod.find('nfe:uCom', ns).text if prod.find('nfe:uCom', ns) is not None else None,
+                'qCom': float(prod.find('nfe:qCom', ns).text) if prod.find('nfe:qCom', ns) is not None else 0.0,
+                'vUnCom': float(prod.find('nfe:vUnCom', ns).text) if prod.find('nfe:vUnCom', ns) is not None else 0.0,
+                'vProd': float(prod.find('nfe:vProd', ns).text) if prod.find('nfe:vProd', ns) is not None else 0.0,
+                'ICMS': self._extrair_icms_item(imposto),
+                'IPI': self._extrair_ipi_item(imposto),
+                'PIS': self._extrair_pis_item(imposto),
+                'COFINS': self._extrair_cofins_item(imposto)
+            }
+            itens.append(item)
+        return itens
+
+    def _extrair_tipo_operacao(self):
+        ide = self.root.find('.//nfe:ide', ns)
+        if ide is not None:
+            return ide.find('nfe:indOper', ns).text if ide.find('nfe:indOper', ns) is not None else None
+        return None
+
+    def _extrair_icms_item(self, imposto):
+        icms = imposto.find('nfe:ICMS', ns)
+        if icms is not None:
+            # Verifica todos os possíveis tipos de ICMS
+            for trib in icms:
+                if trib.tag.endswith('ICMS00'):
+                    return {
+                        'tipo': '00',
+                        'CST': trib.find('nfe:CST', ns).text if trib.find('nfe:CST', ns) is not None else None,
+                        'vBC': float(trib.find('nfe:vBC', ns).text) if trib.find('nfe:vBC', ns) is not None else 0.0,
+                        'pICMS': float(trib.find('nfe:pICMS', ns).text) if trib.find('nfe:pICMS', ns) is not None else 0.0,
+                        'vICMS': float(trib.find('nfe:vICMS', ns).text) if trib.find('nfe:vICMS', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMS10'):
+                    return {
+                        'tipo': '10',
+                        'CST': trib.find('nfe:CST', ns).text if trib.find('nfe:CST', ns) is not None else None,
+                        'vBC': float(trib.find('nfe:vBC', ns).text) if trib.find('nfe:vBC', ns) is not None else 0.0,
+                        'pICMS': float(trib.find('nfe:pICMS', ns).text) if trib.find('nfe:pICMS', ns) is not None else 0.0,
+                        'vICMS': float(trib.find('nfe:vICMS', ns).text) if trib.find('nfe:vICMS', ns) is not None else 0.0,
+                        'vBCST': float(trib.find('nfe:vBCST', ns).text) if trib.find('nfe:vBCST', ns) is not None else 0.0,
+                        'pICMSST': float(trib.find('nfe:pICMSST', ns).text) if trib.find('nfe:pICMSST', ns) is not None else 0.0,
+                        'vICMSST': float(trib.find('nfe:vICMSST', ns).text) if trib.find('nfe:vICMSST', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMS20'):
+                    return {
+                        'tipo': '20',
+                        'CST': trib.find('nfe:CST', ns).text if trib.find('nfe:CST', ns) is not None else None,
+                        'vBC': float(trib.find('nfe:vBC', ns).text) if trib.find('nfe:vBC', ns) is not None else 0.0,
+                        'pICMS': float(trib.find('nfe:pICMS', ns).text) if trib.find('nfe:pICMS', ns) is not None else 0.0,
+                        'vICMS': float(trib.find('nfe:vICMS', ns).text) if trib.find('nfe:vICMS', ns) is not None else 0.0,
+                        'pRedBC': float(trib.find('nfe:pRedBC', ns).text) if trib.find('nfe:pRedBC', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMS30'):
+                    return {
+                        'tipo': '30',
+                        'CST': trib.find('nfe:CST', ns).text if trib.find('nfe:CST', ns) is not None else None,
+                        'vBCST': float(trib.find('nfe:vBCST', ns).text) if trib.find('nfe:vBCST', ns) is not None else 0.0,
+                        'pICMSST': float(trib.find('nfe:pICMSST', ns).text) if trib.find('nfe:pICMSST', ns) is not None else 0.0,
+                        'vICMSST': float(trib.find('nfe:vICMSST', ns).text) if trib.find('nfe:vICMSST', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMS60'):
+                    return {
+                        'tipo': '60',
+                        'CST': trib.find('nfe:CST', ns).text if trib.find('nfe:CST', ns) is not None else None,
+                        'vBCSTRet': float(trib.find('nfe:vBCSTRet', ns).text) if trib.find('nfe:vBCSTRet', ns) is not None else 0.0,
+                        'vICMSSTRet': float(trib.find('nfe:vICMSSTRet', ns).text) if trib.find('nfe:vICMSSTRet', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMS70'):
+                    return {
+                        'tipo': '70',
+                        'CST': trib.find('nfe:CST', ns).text if trib.find('nfe:CST', ns) is not None else None,
+                        'vBC': float(trib.find('nfe:vBC', ns).text) if trib.find('nfe:vBC', ns) is not None else 0.0,
+                        'pICMS': float(trib.find('nfe:pICMS', ns).text) if trib.find('nfe:pICMS', ns) is not None else 0.0,
+                        'vICMS': float(trib.find('nfe:vICMS', ns).text) if trib.find('nfe:vICMS', ns) is not None else 0.0,
+                        'vBCST': float(trib.find('nfe:vBCST', ns).text) if trib.find('nfe:vBCST', ns) is not None else 0.0,
+                        'pICMSST': float(trib.find('nfe:pICMSST', ns).text) if trib.find('nfe:pICMSST', ns) is not None else 0.0,
+                        'vICMSST': float(trib.find('nfe:vICMSST', ns).text) if trib.find('nfe:vICMSST', ns) is not None else 0.0,
+                        'pRedBC': float(trib.find('nfe:pRedBC', ns).text) if trib.find('nfe:pRedBC', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMS90'):
+                    return {
+                        'tipo': '90',
+                        'CST': trib.find('nfe:CST', ns).text if trib.find('nfe:CST', ns) is not None else None,
+                        'vBC': float(trib.find('nfe:vBC', ns).text) if trib.find('nfe:vBC', ns) is not None else 0.0,
+                        'pICMS': float(trib.find('nfe:pICMS', ns).text) if trib.find('nfe:pICMS', ns) is not None else 0.0,
+                        'vICMS': float(trib.find('nfe:vICMS', ns).text) if trib.find('nfe:vICMS', ns) is not None else 0.0,
+                        'vBCST': float(trib.find('nfe:vBCST', ns).text) if trib.find('nfe:vBCST', ns) is not None else 0.0,
+                        'pICMSST': float(trib.find('nfe:pICMSST', ns).text) if trib.find('nfe:pICMSST', ns) is not None else 0.0,
+                        'vICMSST': float(trib.find('nfe:vICMSST', ns).text) if trib.find('nfe:vICMSST', ns) is not None else 0.0,
+                        'pRedBC': float(trib.find('nfe:pRedBC', ns).text) if trib.find('nfe:pRedBC', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMSSN101'):
+                    return {
+                        'tipo': 'SN101',
+                        'CSOSN': trib.find('nfe:CSOSN', ns).text if trib.find('nfe:CSOSN', ns) is not None else None,
+                        'pCredSN': float(trib.find('nfe:pCredSN', ns).text) if trib.find('nfe:pCredSN', ns) is not None else 0.0,
+                        'vCredICMSSN': float(trib.find('nfe:vCredICMSSN', ns).text) if trib.find('nfe:vCredICMSSN', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMSSN102'):
+                    return {
+                        'tipo': 'SN102',
+                        'CSOSN': trib.find('nfe:CSOSN', ns).text if trib.find('nfe:CSOSN', ns) is not None else None
+                    }
+                elif trib.tag.endswith('ICMSSN201'):
+                    return {
+                        'tipo': 'SN201',
+                        'CSOSN': trib.find('nfe:CSOSN', ns).text if trib.find('nfe:CSOSN', ns) is not None else None,
+                        'vBCST': float(trib.find('nfe:vBCST', ns).text) if trib.find('nfe:vBCST', ns) is not None else 0.0,
+                        'pICMSST': float(trib.find('nfe:pICMSST', ns).text) if trib.find('nfe:pICMSST', ns) is not None else 0.0,
+                        'vICMSST': float(trib.find('nfe:vICMSST', ns).text) if trib.find('nfe:vICMSST', ns) is not None else 0.0,
+                        'pCredSN': float(trib.find('nfe:pCredSN', ns).text) if trib.find('nfe:pCredSN', ns) is not None else 0.0,
+                        'vCredICMSSN': float(trib.find('nfe:vCredICMSSN', ns).text) if trib.find('nfe:vCredICMSSN', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMSSN202'):
+                    return {
+                        'tipo': 'SN202',
+                        'CSOSN': trib.find('nfe:CSOSN', ns).text if trib.find('nfe:CSOSN', ns) is not None else None,
+                        'vBCST': float(trib.find('nfe:vBCST', ns).text) if trib.find('nfe:vBCST', ns) is not None else 0.0,
+                        'pICMSST': float(trib.find('nfe:pICMSST', ns).text) if trib.find('nfe:pICMSST', ns) is not None else 0.0,
+                        'vICMSST': float(trib.find('nfe:vICMSST', ns).text) if trib.find('nfe:vICMSST', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMSSN500'):
+                    return {
+                        'tipo': 'SN500',
+                        'CSOSN': trib.find('nfe:CSOSN', ns).text if trib.find('nfe:CSOSN', ns) is not None else None,
+                        'vBCSTRet': float(trib.find('nfe:vBCSTRet', ns).text) if trib.find('nfe:vBCSTRet', ns) is not None else 0.0,
+                        'vICMSSTRet': float(trib.find('nfe:vICMSSTRet', ns).text) if trib.find('nfe:vICMSSTRet', ns) is not None else 0.0
+                    }
+                elif trib.tag.endswith('ICMSSN900'):
+                    return {
+                        'tipo': 'SN900',
+                        'CSOSN': trib.find('nfe:CSOSN', ns).text if trib.find('nfe:CSOSN', ns) is not None else None,
+                        'vBC': float(trib.find('nfe:vBC', ns).text) if trib.find('nfe:vBC', ns) is not None else 0.0,
+                        'pICMS': float(trib.find('nfe:pICMS', ns).text) if trib.find('nfe:pICMS', ns) is not None else 0.0,
+                        'vICMS': float(trib.find('nfe:vICMS', ns).text) if trib.find('nfe:vICMS', ns) is not None else 0.0,
+                        'vBCST': float(trib.find('nfe:vBCST', ns).text) if trib.find('nfe:vBCST', ns) is not None else 0.0,
+                        'pICMSST': float(trib.find('nfe:pICMSST', ns).text) if trib.find('nfe:pICMSST', ns) is not None else 0.0,
+                        'vICMSST': float(trib.find('nfe:vICMSST', ns).text) if trib.find('nfe:vICMSST', ns) is not None else 0.0,
+                        'pCredSN': float(trib.find('nfe:pCredSN', ns).text) if trib.find('nfe:pCredSN', ns) is not None else 0.0,
+                        'vCredICMSSN': float(trib.find('nfe:vCredICMSSN', ns).text) if trib.find('nfe:vCredICMSSN', ns) is not None else 0.0
+                    }
+        return None
+
+    def _extrair_ipi_item(self, imposto):
+        ipi = imposto.find('nfe:IPI', ns)
+        if ipi is not None:
+            ipi_trib = ipi.find('nfe:IPITrib', ns)
+            if ipi_trib is not None:
+                return {
+                    'CST': ipi_trib.find('nfe:CST', ns).text if ipi_trib.find('nfe:CST', ns) is not None else None,
+                    'vBC': float(ipi_trib.find('nfe:vBC', ns).text) if ipi_trib.find('nfe:vBC', ns) is not None else 0.0,
+                    'pIPI': float(ipi_trib.find('nfe:pIPI', ns).text) if ipi_trib.find('nfe:pIPI', ns) is not None else 0.0,
+                    'vIPI': float(ipi_trib.find('nfe:vIPI', ns).text) if ipi_trib.find('nfe:vIPI', ns) is not None else 0.0
+                }
+            
+            ipi_nt = ipi.find('nfe:IPINT', ns)
+            if ipi_nt is not None:
+                return {
+                    'CST': ipi_nt.find('nfe:CST', ns).text if ipi_nt.find('nfe:CST', ns) is not None else None,
+                    'vBC': 0.0,
+                    'pIPI': 0.0,
+                    'vIPI': 0.0
+                }
+        return None
+
+    def _extrair_pis_item(self, imposto):
+        pis = imposto.find('nfe:PIS', ns)
+        if pis is not None:
+            pis_aliq = pis.find('nfe:PISAliq', ns)
+            if pis_aliq is not None:
+                return {
+                    'CST': pis_aliq.find('nfe:CST', ns).text if pis_aliq.find('nfe:CST', ns) is not None else None,
+                    'vBC': float(pis_aliq.find('nfe:vBC', ns).text) if pis_aliq.find('nfe:vBC', ns) is not None else 0.0,
+                    'pPIS': float(pis_aliq.find('nfe:pPIS', ns).text) if pis_aliq.find('nfe:pPIS', ns) is not None else 0.0,
+                    'vPIS': float(pis_aliq.find('nfe:vPIS', ns).text) if pis_aliq.find('nfe:vPIS', ns) is not None else 0.0
+                }
+            
+            pis_nt = pis.find('nfe:PISNT', ns)
+            if pis_nt is not None:
+                return {
+                    'CST': pis_nt.find('nfe:CST', ns).text if pis_nt.find('nfe:CST', ns) is not None else None,
+                    'vBC': 0.0,
+                    'pPIS': 0.0,
+                    'vPIS': 0.0
+                }
+            
+            pis_outr = pis.find('nfe:PISOutr', ns)
+            if pis_outr is not None:
+                return {
+                    'CST': pis_outr.find('nfe:CST', ns).text if pis_outr.find('nfe:CST', ns) is not None else None,
+                    'vBC': float(pis_outr.find('nfe:vBC', ns).text) if pis_outr.find('nfe:vBC', ns) is not None else 0.0,
+                    'pPIS': float(pis_outr.find('nfe:pPIS', ns).text) if pis_outr.find('nfe:pPIS', ns) is not None else 0.0,
+                    'vPIS': float(pis_outr.find('nfe:vPIS', ns).text) if pis_outr.find('nfe:vPIS', ns) is not None else 0.0,
+                    'qBCProd': float(pis_outr.find('nfe:qBCProd', ns).text) if pis_outr.find('nfe:qBCProd', ns) is not None else 0.0,
+                    'vAliqProd': float(pis_outr.find('nfe:vAliqProd', ns).text) if pis_outr.find('nfe:vAliqProd', ns) is not None else 0.0
+                }
+        return None
+
+    def _extrair_cofins_item(self, imposto):
+        cofins = imposto.find('nfe:COFINS', ns)
+        if cofins is not None:
+            cofins_aliq = cofins.find('nfe:COFINSAliq', ns)
+            if cofins_aliq is not None:
+                return {
+                    'CST': cofins_aliq.find('nfe:CST', ns).text if cofins_aliq.find('nfe:CST', ns) is not None else None,
+                    'vBC': float(cofins_aliq.find('nfe:vBC', ns).text) if cofins_aliq.find('nfe:vBC', ns) is not None else 0.0,
+                    'pCOFINS': float(cofins_aliq.find('nfe:pCOFINS', ns).text) if cofins_aliq.find('nfe:pCOFINS', ns) is not None else 0.0,
+                    'vCOFINS': float(cofins_aliq.find('nfe:vCOFINS', ns).text) if cofins_aliq.find('nfe:vCOFINS', ns) is not None else 0.0
+                }
+            
+            cofins_nt = cofins.find('nfe:COFINSNT', ns)
+            if cofins_nt is not None:
+                return {
+                    'CST': cofins_nt.find('nfe:CST', ns).text if cofins_nt.find('nfe:CST', ns) is not None else None,
+                    'vBC': 0.0,
+                    'pCOFINS': 0.0,
+                    'vCOFINS': 0.0
+                }
+            
+            cofins_outr = cofins.find('nfe:COFINSOutr', ns)
+            if cofins_outr is not None:
+                return {
+                    'CST': cofins_outr.find('nfe:CST', ns).text if cofins_outr.find('nfe:CST', ns) is not None else None,
+                    'vBC': float(cofins_outr.find('nfe:vBC', ns).text) if cofins_outr.find('nfe:vBC', ns) is not None else 0.0,
+                    'pCOFINS': float(cofins_outr.find('nfe:pCOFINS', ns).text) if cofins_outr.find('nfe:pCOFINS', ns) is not None else 0.0,
+                    'vCOFINS': float(cofins_outr.find('nfe:vCOFINS', ns).text) if cofins_outr.find('nfe:vCOFINS', ns) is not None else 0.0,
+                    'qBCProd': float(cofins_outr.find('nfe:qBCProd', ns).text) if cofins_outr.find('nfe:qBCProd', ns) is not None else 0.0,
+                    'vAliqProd': float(cofins_outr.find('nfe:vAliqProd', ns).text) if cofins_outr.find('nfe:vAliqProd', ns) is not None else 0.0
+                }
+        return None
+
+    def _extrair_icms(self):
+        icms = {
+            'vICMS': 0.0,
+            'vST': 0.0,
+            'vFCP': 0.0,
+            'vFCPST': 0.0,
+            'vFCPSTRet': 0.0,
+            'vICMSDeson': 0.0,
+            'vICMSOp': 0.0,
+            'vICMSDIF': 0.0,
+            'vICMSST': 0.0
+        }
+        
+        total = self.root.find('.//nfe:total/nfe:ICMSTot', ns)
+        if total is not None:
+            icms['vICMS'] = float(total.find('nfe:vICMS', ns).text) if total.find('nfe:vICMS', ns) is not None else 0.0
+            icms['vST'] = float(total.find('nfe:vST', ns).text) if total.find('nfe:vST', ns) is not None else 0.0
+            icms['vFCP'] = float(total.find('nfe:vFCP', ns).text) if total.find('nfe:vFCP', ns) is not None else 0.0
+            icms['vFCPST'] = float(total.find('nfe:vFCPST', ns).text) if total.find('nfe:vFCPST', ns) is not None else 0.0
+            icms['vFCPSTRet'] = float(total.find('nfe:vFCPSTRet', ns).text) if total.find('nfe:vFCPSTRet', ns) is not None else 0.0
+            icms['vICMSDeson'] = float(total.find('nfe:vICMSDeson', ns).text) if total.find('nfe:vICMSDeson', ns) is not None else 0.0
+            icms['vICMSOp'] = float(total.find('nfe:vICMSOp', ns).text) if total.find('nfe:vICMSOp', ns) is not None else 0.0
+            icms['vICMSDIF'] = float(total.find('nfe:vICMSDIF', ns).text) if total.find('nfe:vICMSDIF', ns) is not None else 0.0
+            icms['vICMSST'] = float(total.find('nfe:vICMSST', ns).text) if total.find('nfe:vICMSST', ns) is not None else 0.0
+        
+        return icms
+
+    def _extrair_ipi(self):
+        ipi = {
+            'vIPI': 0.0
+        }
+        
+        total = self.root.find('.//nfe:total/nfe:IPITot', ns)
+        if total is not None:
+            ipi['vIPI'] = float(total.find('nfe:vIPI', ns).text) if total.find('nfe:vIPI', ns) is not None else 0.0
+        
+        return ipi
+
+    def _extrair_pis(self):
+        pis = {
+            'vPIS': 0.0
+        }
+        
+        total = self.root.find('.//nfe:total/nfe:PISTot', ns)
+        if total is not None:
+            pis['vPIS'] = float(total.find('nfe:vPIS', ns).text) if total.find('nfe:vPIS', ns) is not None else 0.0
+        
+        return pis
+
+    def _extrair_cofins(self):
+        cofins = {
+            'vCOFINS': 0.0
+        }
+        
+        total = self.root.find('.//nfe:total/nfe:COFINSTot', ns)
+        if total is not None:
+            cofins['vCOFINS'] = float(total.find('nfe:vCOFINS', ns).text) if total.find('nfe:vCOFINS', ns) is not None else 0.0
+        
+        return cofins
+
+class ApuracaoFiscal:
+    def __init__(self):
+        self.notas = []
+        self.cnpj_empresa = None
+        self.periodo_inicio = None
+        self.periodo_fim = None
+    
+    def adicionar_nota(self, nota):
+        self.notas.append(nota)
+    
+    def definir_cnpj_empresa(self, cnpj):
+        self.cnpj_empresa = cnpj
+    
+    def definir_periodo(self, inicio, fim):
+        self.periodo_inicio = inicio
+        self.periodo_fim = fim
+    
+    def calcular_icms(self):
+        debito = 0.0
+        credito = 0.0
+        st = 0.0
+        difal = 0.0
+        
+        for nota in self.notas:
+            # Verifica se a nota está dentro do período definido
+            if self.periodo_inicio and self.periodo_fim:
+                if not (self.periodo_inicio <= nota.data_emissao.date() <= self.periodo_fim):
+                    continue
+            
+            # Verifica se a nota é de entrada ou saída para o CNPJ da empresa
+            if nota.emitente['cnpj'] == self.cnpj_empresa:
+                # Nota de saída (débito)
+                debito += nota.valor_total['vICMS']
+                st += nota.valor_total['vST']
+            elif nota.destinatario['cnpj'] == self.cnpj_empresa:
+                # Nota de entrada (crédito)
+                credito += nota.valor_total['vICMS']
+                
+                # Cálculo do DIFAL (se aplicável)
+                if nota.emitente['cnpj'] and nota.destinatario['cnpj']:
+                    # Verifica se é operação interestadual
+                    uf_emitente = nota.emitente['cnpj'][:2]  # Simplificação - na prática, deveria pegar a UF do emitente
+                    uf_destino = nota.destinatario['cnpj'][:2]  # Simplificação
+                    
+                    if uf_emitente != uf_destino:
+                        # Calcula o DIFAL (simplificado)
+                        aliquota_interna = 0.18  # Exemplo - deveria ser obtido de uma tabela por UF e NCM
+                        aliquota_interestadual = 0.12  # Exemplo
+                        difal += (nota.valor_total['vProd'] * (aliquota_interna - aliquota_interestadual))
+        
+        return {
+            'Débito': debito,
+            'Crédito': credito,
+            'Saldo': debito - credito,
+            'ST': st,
+            'DIFAL': difal
+        }
+    
+    def calcular_ipi(self):
+        debito = 0.0
+        credito = 0.0
+        
+        for nota in self.notas:
+            if self.periodo_inicio and self.periodo_fim:
+                if not (self.periodo_inicio <= nota.data_emissao.date() <= self.periodo_fim):
+                    continue
+            
+            if nota.emitente['cnpj'] == self.cnpj_empresa:
+                debito += nota.valor_total['vIPI']
+            elif nota.destinatario['cnpj'] == self.cnpj_empresa:
+                credito += nota.valor_total['vIPI']
+        
+        return {
+            'Débito': debito,
+            'Crédito': credito,
+            'Saldo': debito - credito
+        }
+    
+    def calcular_pis(self):
+        debito = 0.0
+        credito = 0.0
+        
+        for nota in self.notas:
+            if self.periodo_inicio and self.periodo_fim:
+                if not (self.periodo_inicio <= nota.data_emissao.date() <= self.periodo_fim):
+                    continue
+            
+            if nota.emitente['cnpj'] == self.cnpj_empresa:
+                debito += nota.valor_total['vPIS']
+            elif nota.destinatario['cnpj'] == self.cnpj_empresa:
+                credito += nota.valor_total['vPIS']
+        
+        return {
+            'Débito': debito,
+            'Crédito': credito,
+            'Saldo': debito - credito
+        }
+    
+    def calcular_cofins(self):
+        debito = 0.0
+        credito = 0.0
+        
+        for nota in self.notas:
+            if self.periodo_inicio and self.periodo_fim:
+                if not (self.periodo_inicio <= nota.data_emissao.date() <= self.periodo_fim):
+                    continue
+            
+            if nota.emitente['cnpj'] == self.cnpj_empresa:
+                debito += nota.valor_total['vCOFINS']
+            elif nota.destinatario['cnpj'] == self.cnpj_empresa:
+                credito += nota.valor_total['vCOFINS']
+        
+        return {
+            'Débito': debito,
+            'Crédito': credito,
+            'Saldo': debito - credito
+        }
+
+# Funções auxiliares
+def processar_arquivos(uploaded_files, apuracao):
+    notas_processadas = 0
+    erros = 0
     
     for uploaded_file in uploaded_files:
         try:
@@ -220,437 +607,499 @@ def processar_arquivos(uploaded_files):
                 tmp.write(uploaded_file.getvalue())
                 tmp_path = tmp.name
             
-            # Processar o XML
-            resultado = parse_xml(tmp_path)
-            
-            if resultado:
-                notas_fiscais.append(resultado['nfe'])
-                for item in resultado['itens']:
-                    item['chave'] = resultado['nfe']['chave']
-                    itens_notas.append(item)
-            
-            # Remover o arquivo temporário
-            os.unlink(tmp_path)
+            # Verificar se é um arquivo ZIP
+            if uploaded_file.name.lower().endswith('.zip'):
+                with zipfile.ZipFile(tmp_path, 'r') as zip_ref:
+                    # Extrair todos os arquivos XML
+                    for file_info in zip_ref.infolist():
+                        if file_info.filename.lower().endswith('.xml'):
+                            with zip_ref.open(file_info) as xml_file:
+                                xml_content = xml_file.read()
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as xml_tmp:
+                                    xml_tmp.write(xml_content)
+                                    xml_tmp_path = xml_tmp.name
+                                
+                                try:
+                                    nota = NotaFiscal(xml_tmp_path)
+                                    apuracao.adicionar_nota(nota)
+                                    notas_processadas += 1
+                                except ET.ParseError:
+                                    erros += 1
+                                finally:
+                                    os.unlink(xml_tmp_path)
+            else:
+                # Processar arquivo XML individual
+                try:
+                    nota = NotaFiscal(tmp_path)
+                    apuracao.adicionar_nota(nota)
+                    notas_processadas += 1
+                except ET.ParseError:
+                    erros += 1
         except Exception as e:
+            erros += 1
             st.error(f"Erro ao processar o arquivo {uploaded_file.name}: {str(e)}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     
-    return notas_fiscais, itens_notas
+    return notas_processadas, erros
 
-# Funções para cálculo dos impostos
-def calcular_icms(itens):
-    # Agrupar por CFOP e CST
-    df = pd.DataFrame(itens)
-    
-    if df.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    
-    # Cálculo do ICMS normal
-    icms_normal = df.groupby(['cfop', 'icms_cst']).agg({
-        'valor_total': 'sum',
-        'icms_bc': 'sum',
-        'icms_v': 'sum'
-    }).reset_index()
-    
-    icms_normal = icms_normal.rename(columns={
-        'valor_total': 'Valor Total',
-        'icms_bc': 'Base de Cálculo ICMS',
-        'icms_v': 'Valor ICMS'
-    })
-    
-    # Cálculo do ICMS ST
-    icms_st = df[df['icms_v_st'] > 0].groupby(['cfop', 'icms_cst']).agg({
-        'icms_bc_st': 'sum',
-        'icms_v_st': 'sum'
-    }).reset_index()
-    
-    if not icms_st.empty:
-        icms_st = icms_st.rename(columns={
-            'icms_bc_st': 'Base de Cálculo ST',
-            'icms_v_st': 'Valor ST'
-        })
-    else:
-        icms_st = pd.DataFrame(columns=['cfop', 'icms_cst', 'Base de Cálculo ST', 'Valor ST'])
-    
-    # Cálculo do DIFAL (para operações interestaduais)
-    difal = df[(df['icms_cst'].isin(['60', '10'])) & (df['icms_v_st'] == 0)].copy()
-    
-    if not difal.empty:
-        # Simulação de cálculo do DIFAL (fórmula simplificada)
-        difal['DIFAL'] = difal.apply(lambda x: (x['icms_bc'] * 0.12) - x['icms_v'], axis=1)
-        
-        difal_result = difal.groupby(['cfop', 'icms_cst']).agg({
-            'icms_bc': 'sum',
-            'DIFAL': 'sum'
-        }).reset_index()
-        
-        difal_result = difal_result.rename(columns={
-            'icms_bc': 'Base de Cálculo DIFAL',
-            'DIFAL': 'Valor DIFAL'
-        })
-    else:
-        difal_result = pd.DataFrame(columns=['cfop', 'icms_cst', 'Base de Cálculo DIFAL', 'Valor DIFAL'])
-    
-    return icms_normal, icms_st, difal_result
+def formatar_moeda(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def calcular_ipi(itens):
-    df = pd.DataFrame(itens)
+def mostrar_resumo_apuracao(apuracao):
+    st.subheader("Resumo da Apuração")
     
-    if df.empty:
-        return pd.DataFrame()
+    col1, col2, col3 = st.columns(3)
     
-    ipi = df[df['ipi_v'] > 0].groupby(['cfop', 'ipi_cst']).agg({
-        'valor_total': 'sum',
-        'ipi_bc': 'sum',
-        'ipi_v': 'sum'
-    }).reset_index()
+    with col1:
+        st.metric("Total de Notas", len(apuracao.notas))
     
-    ipi = ipi.rename(columns={
-        'valor_total': 'Valor Total',
-        'ipi_bc': 'Base de Cálculo IPI',
-        'ipi_v': 'Valor IPI'
-    })
+    with col2:
+        if apuracao.periodo_inicio and apuracao.periodo_fim:
+            st.metric("Período", f"{apuracao.periodo_inicio.strftime('%d/%m/%Y')} a {apuracao.periodo_fim.strftime('%d/%m/%Y')}")
+        else:
+            st.metric("Período", "Não definido")
     
-    return ipi
+    with col3:
+        st.metric("CNPJ", apuracao.cnpj_empresa if apuracao.cnpj_empresa else "Não informado")
 
-def calcular_pis_cofins(itens):
-    df = pd.DataFrame(itens)
-    
-    if df.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    
-    # PIS
-    pis = df[df['pis_v'] > 0].groupby(['cfop', 'pis_cst']).agg({
-        'valor_total': 'sum',
-        'pis_bc': 'sum',
-        'pis_v': 'sum'
-    }).reset_index()
-    
-    pis = pis.rename(columns={
-        'valor_total': 'Valor Total',
-        'pis_bc': 'Base de Cálculo PIS',
-        'pis_v': 'Valor PIS'
-    })
-    
-    # COFINS
-    cofins = df[df['cofins_v'] > 0].groupby(['cfop', 'cofins_cst']).agg({
-        'valor_total': 'sum',
-        'cofins_bc': 'sum',
-        'cofins_v': 'sum'
-    }).reset_index()
-    
-    cofins = cofins.rename(columns={
-        'valor_total': 'Valor Total',
-        'cofins_bc': 'Base de Cálculo COFINS',
-        'cofins_v': 'Valor COFINS'
-    })
-    
-    return pis, cofins
+# Estado da aplicação
+if 'apuracao' not in st.session_state:
+    st.session_state.apuracao = ApuracaoFiscal()
 
-# Função para gerar relatório consolidado
-def gerar_relatorio_consolidado(notas_fiscais, icms_normal, icms_st, difal, ipi, pis, cofins):
-    relatorio = {
-        'Resumo Geral': {
-            'Quantidade de Notas Fiscais': len(notas_fiscais),
-            'Valor Total das Notas': sum(nf['valor_total'] for nf in notas_fiscais),
-            'Período das Notas': f"{min(nf['data_emissao'][:10] for nf in notas_fiscais)} a {max(nf['data_emissao'][:10] for nf in notas_fiscais)}"
-        },
-        'ICMS': {
-            'Valor Total ICMS Normal': icms_normal['Valor ICMS'].sum() if not icms_normal.empty else 0,
-            'Valor Total ICMS ST': icms_st['Valor ST'].sum() if not icms_st.empty else 0,
-            'Valor Total DIFAL': difal['Valor DIFAL'].sum() if not difal.empty else 0
-        },
-        'IPI': {
-            'Valor Total IPI': ipi['Valor IPI'].sum() if not ipi.empty else 0
-        },
-        'PIS': {
-            'Valor Total PIS': pis['Valor PIS'].sum() if not pis.empty else 0
-        },
-        'COFINS': {
-            'Valor Total COFINS': cofins['Valor COFINS'].sum() if not cofins.empty else 0
-        }
-    }
-    
-    return relatorio
+# Navegação
+st.sidebar.title("Navegação")
+pagina = st.sidebar.radio("Selecione a página:", 
+                         ["Início", "ICMS", "IPI", "PIS", "COFINS", "Importar XMLs"])
 
-# Interface do Streamlit
-def main():
-    # Inicializar variáveis de sessão
-    if 'notas_fiscais' not in st.session_state:
-        st.session_state.notas_fiscais = []
-    if 'itens_notas' not in st.session_state:
-        st.session_state.itens_notas = []
-    
-    # Sidebar - Upload de arquivos
-    with st.sidebar:
-        st.markdown("## Configurações")
-        uploaded_files = st.file_uploader("Carregar XMLs de NFe", type=['xml'], accept_multiple_files=True)
-        
-        if uploaded_files and st.button("Processar XMLs"):
-            with st.spinner("Processando arquivos..."):
-                notas_fiscais, itens_notas = processar_arquivos(uploaded_files)
-                st.session_state.notas_fiscais = notas_fiscais
-                st.session_state.itens_notas = itens_notas
-                st.success(f"{len(notas_fiscais)} notas fiscais processadas com sucesso!")
-        
-        if st.session_state.notas_fiscais:
-            st.markdown("---")
-            st.markdown("### Relatórios Disponíveis")
-            st.markdown(f"**Notas Processadas:** {len(st.session_state.notas_fiscais)}")
-            st.markdown(f"**Itens Processados:** {len(st.session_state.itens_notas)}")
-            
-            # Botão para exportar dados
-            if st.button("Exportar Dados para Excel"):
-                with st.spinner("Gerando arquivo Excel..."):
-                    # Criar um arquivo Excel com múltiplas abas
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        pd.DataFrame(st.session_state.notas_fiscais).to_excel(writer, sheet_name='Notas Fiscais', index=False)
-                        pd.DataFrame(st.session_state.itens_notas).to_excel(writer, sheet_name='Itens', index=False)
-                        
-                        # Adicionar abas para cada imposto
-                        icms_normal, icms_st, difal = calcular_icms(st.session_state.itens_notas)
-                        if not icms_normal.empty:
-                            icms_normal.to_excel(writer, sheet_name='ICMS Normal', index=False)
-                        if not icms_st.empty:
-                            icms_st.to_excel(writer, sheet_name='ICMS ST', index=False)
-                        if not difal.empty:
-                            difal.to_excel(writer, sheet_name='DIFAL', index=False)
-                        
-                        ipi = calcular_ipi(st.session_state.itens_notas)
-                        if not ipi.empty:
-                            ipi.to_excel(writer, sheet_name='IPI', index=False)
-                        
-                        pis, cofins = calcular_pis_cofins(st.session_state.itens_notas)
-                        if not pis.empty:
-                            pis.to_excel(writer, sheet_name='PIS', index=False)
-                        if not cofins.empty:
-                            cofins.to_excel(writer, sheet_name='COFINS', index=False)
-                    
-                    output.seek(0)
-                    st.download_button(
-                        label="Baixar Arquivo Excel",
-                        data=output,
-                        file_name="apuracao_fiscal.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-    
-    # Página principal
+# Página Inicial
+if pagina == "Início":
+    st.title("Sistema de Apuração Fiscal")
     st.markdown("""
     <div class="header">
-        <div class="header-title">Sistema de Apuração Fiscal</div>
-        <div class="header-subtitle">ICMS | IPI | PIS | COFINS | DIFAL | ST</div>
+        <h2>Bem-vindo ao Sistema de Apuração de ICMS, IPI, PIS e COFINS</h2>
     </div>
     """, unsafe_allow_html=True)
     
-    # Navegação por abas
-    tabs = st.tabs(["🏠 Início", "📊 ICMS", "🏭 IPI", "💰 PIS", "💵 COFINS", "📈 Consolidador"])
+    st.markdown("""
+    <div class="info-card">
+        <h3>Instruções:</h3>
+        <ol>
+            <li>Informe o CNPJ da empresa na página "Importar XMLs"</li>
+            <li>Defina o período de apuração</li>
+            <li>Importe os arquivos XML das notas fiscais</li>
+            <li>Navegue pelas abas para visualizar as apurações de cada imposto</li>
+        </ol>
+    </div>
+    """, unsafe_allow_html=True)
     
-    with tabs[0]:  # Página inicial
-        st.markdown("""
-        <div class="card">
-            <div class="card-title">Bem-vindo ao Sistema de Apuração Fiscal</div>
-            <p>Este sistema permite a apuração dos impostos ICMS, IPI, PIS e COFINS com base nos XMLs de Notas Fiscais Eletrônicas (Modelo 55).</p>
-            <p>Para começar, carregue os arquivos XML no menu lateral e clique em "Processar XMLs".</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.notas_fiscais:
-            st.markdown("### Resumo das Notas Processadas")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total de Notas", len(st.session_state.notas_fiscais))
-            with col2:
-                total_valor = sum(nf['valor_total'] for nf in st.session_state.notas_fiscais)
-                st.metric("Valor Total", f"R$ {total_valor:,.2f}")
-            with col3:
-                datas = [nf['data_emissao'][:10] for nf in st.session_state.notas_fiscais]
-                st.metric("Período", f"{min(datas)} a {max(datas)}")
-            
-            # Gráfico de barras com valores por data
-            df_notas = pd.DataFrame(st.session_state.notas_fiscais)
-            df_notas['data'] = pd.to_datetime(df_notas['data_emissao'].str[:10])
-            df_grouped = df_notas.groupby('data')['valor_total'].sum().reset_index()
-            
-            fig = px.bar(df_grouped, x='data', y='valor_total', 
-                         title='Valor Total por Data de Emissão',
-                         labels={'data': 'Data', 'valor_total': 'Valor Total (R$)'})
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Tabela com as notas fiscais
-            st.dataframe(df_notas[['chave', 'numero', 'serie', 'data_emissao', 'emitente_nome', 'destinatario_nome', 'valor_total']], 
-                         hide_index=True, use_container_width=True)
-    
-    with tabs[1]:  # ICMS
-        st.markdown("""
-        <div class="card">
-            <div class="card-title">Apuração do ICMS</div>
-            <p>Esta seção apresenta a apuração do Imposto sobre Circulação de Mercadorias e Serviços (ICMS), incluindo operações normais, substituição tributária e DIFAL.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.itens_notas:
-            icms_normal, icms_st, difal = calcular_icms(st.session_state.itens_notas)
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("ICMS Normal", f"R$ {icms_normal['Valor ICMS'].sum():,.2f}")
-            with col2:
-                st.metric("ICMS ST", f"R$ {icms_st['Valor ST'].sum():,.2f}" if not icms_st.empty else "R$ 0,00")
-            with col3:
-                st.metric("DIFAL", f"R$ {difal['Valor DIFAL'].sum():,.2f}" if not difal.empty else "R$ 0,00")
-            
-            st.markdown("#### ICMS Normal")
-            st.dataframe(icms_normal, hide_index=True, use_container_width=True)
-            
-            st.markdown("#### ICMS Substituição Tributária")
-            if not icms_st.empty:
-                st.dataframe(icms_st, hide_index=True, use_container_width=True)
-            else:
-                st.info("Nenhuma operação com substituição tributária encontrada.")
-            
-            st.markdown("#### DIFAL - Diferencial de Alíquotas")
-            if not difal.empty:
-                st.dataframe(difal, hide_index=True, use_container_width=True)
-            else:
-                st.info("Nenhuma operação com DIFAL encontrada.")
-        else:
-            st.warning("Nenhum dado disponível. Por favor, carregue e processe os XMLs primeiro.")
-    
-    with tabs[2]:  # IPI
-        st.markdown("""
-        <div class="card">
-            <div class="card-title">Apuração do IPI</div>
-            <p>Esta seção apresenta a apuração do Imposto sobre Produtos Industrializados (IPI).</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.itens_notas:
-            ipi = calcular_ipi(st.session_state.itens_notas)
-            
-            st.metric("Total IPI", f"R$ {ipi['Valor IPI'].sum():,.2f}" if not ipi.empty else "R$ 0,00")
-            
-            if not ipi.empty:
-                st.dataframe(ipi, hide_index=True, use_container_width=True)
-            else:
-                st.info("Nenhuma operação com IPI encontrada.")
-        else:
-            st.warning("Nenhum dado disponível. Por favor, carregue e processe os XMLs primeiro.")
-    
-    with tabs[3]:  # PIS
-        st.markdown("""
-        <div class="card">
-            <div class="card-title">Apuração do PIS</div>
-            <p>Esta seção apresenta a apuração do Programa de Integração Social (PIS).</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.itens_notas:
-            pis, _ = calcular_pis_cofins(st.session_state.itens_notas)
-            
-            st.metric("Total PIS", f"R$ {pis['Valor PIS'].sum():,.2f}" if not pis.empty else "R$ 0,00")
-            
-            if not pis.empty:
-                st.dataframe(pis, hide_index=True, use_container_width=True)
-            else:
-                st.info("Nenhuma operação com PIS encontrada.")
-        else:
-            st.warning("Nenhum dado disponível. Por favor, carregue e processe os XMLs primeiro.")
-    
-    with tabs[4]:  # COFINS
-        st.markdown("""
-        <div class="card">
-            <div class="card-title">Apuração do COFINS</div>
-            <p>Esta seção apresenta a apuração da Contribuição para o Financiamento da Seguridade Social (COFINS).</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.itens_notas:
-            _, cofins = calcular_pis_cofins(st.session_state.itens_notas)
-            
-            st.metric("Total COFINS", f"R$ {cofins['Valor COFINS'].sum():,.2f}" if not cofins.empty else "R$ 0,00")
-            
-            if not cofins.empty:
-                st.dataframe(cofins, hide_index=True, use_container_width=True)
-            else:
-                st.info("Nenhuma operação com COFINS encontrada.")
-        else:
-            st.warning("Nenhum dado disponível. Por favor, carregue e processe os XMLs primeiro.")
-    
-    with tabs[5]:  # Consolidador
-        st.markdown("""
-        <div class="card">
-            <div class="card-title">Relatório Consolidado</div>
-            <p>Esta seção apresenta um resumo consolidado de todos os impostos apurados.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.itens_notas:
-            icms_normal, icms_st, difal = calcular_icms(st.session_state.itens_notas)
-            ipi = calcular_ipi(st.session_state.itens_notas)
-            pis, cofins = calcular_pis_cofins(st.session_state.itens_notas)
-            
-            relatorio = gerar_relatorio_consolidado(
-                st.session_state.notas_fiscais,
-                icms_normal, icms_st, difal,
-                ipi, pis, cofins
-            )
-            
-            # Resumo Geral
-            st.markdown("### Resumo Geral")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Notas Fiscais", relatorio['Resumo Geral']['Quantidade de Notas Fiscais'])
-                st.metric("Período", relatorio['Resumo Geral']['Período das Notas'])
-            with col2:
-                st.metric("Valor Total", f"R$ {relatorio['Resumo Geral']['Valor Total das Notas']:,.2f}")
-            
-            # Resumo por Imposto
-            st.markdown("### Resumo por Imposto")
-            
-            # ICMS
-            with st.expander("ICMS"):
-                cols = st.columns(3)
-                with cols[0]:
-                    st.metric("ICMS Normal", f"R$ {relatorio['ICMS']['Valor Total ICMS Normal']:,.2f}")
-                with cols[1]:
-                    st.metric("ICMS ST", f"R$ {relatorio['ICMS']['Valor Total ICMS ST']:,.2f}")
-                with cols[2]:
-                    st.metric("DIFAL", f"R$ {relatorio['ICMS']['Valor Total DIFAL']:,.2f}")
-            
-            # IPI
-            with st.expander("IPI"):
-                st.metric("Total IPI", f"R$ {relatorio['IPI']['Valor Total IPI']:,.2f}")
-            
-            # PIS e COFINS
-            with st.expander("PIS e COFINS"):
-                cols = st.columns(2)
-                with cols[0]:
-                    st.metric("Total PIS", f"R$ {relatorio['PIS']['Valor Total PIS']:,.2f}")
-                with cols[1]:
-                    st.metric("Total COFINS", f"R$ {relatorio['COFINS']['Valor Total COFINS']:,.2f}")
-            
-            # Gráfico de pizza com a distribuição dos impostos
-            impostos = {
-                'ICMS Normal': relatorio['ICMS']['Valor Total ICMS Normal'],
-                'ICMS ST': relatorio['ICMS']['Valor Total ICMS ST'],
-                'DIFAL': relatorio['ICMS']['Valor Total DIFAL'],
-                'IPI': relatorio['IPI']['Valor Total IPI'],
-                'PIS': relatorio['PIS']['Valor Total PIS'],
-                'COFINS': relatorio['COFINS']['Valor Total COFINS']
-            }
-            
-            df_impostos = pd.DataFrame.from_dict(impostos, orient='index', columns=['Valor']).reset_index()
-            df_impostos = df_impostos.rename(columns={'index': 'Imposto'})
-            df_impostos = df_impostos[df_impostos['Valor'] > 0]
-            
-            if not df_impostos.empty:
-                fig = px.pie(df_impostos, values='Valor', names='Imposto', 
-                             title='Distribuição dos Valores de Impostos',
-                             hole=0.3)
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("Nenhum dado disponível. Por favor, carregue e processe os XMLs primeiro.")
+    st.markdown("""
+    <div class="info-card">
+        <h3>Funcionalidades:</h3>
+        <ul>
+            <li>Apuração de ICMS (incluindo ST e DIFAL)</li>
+            <li>Apuração de IPI</li>
+            <li>Apuração de PIS</li>
+            <li>Apuração de COFINS</li>
+            <li>Importação de múltiplos arquivos XML ou ZIP</li>
+            <li>Filtro por período</li>
+            <li>Relatórios detalhados</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
-if __name__ == "__main__":
-    main()
+# Página de Importação de XMLs
+elif pagina == "Importar XMLs":
+    st.title("Importação de Arquivos XML")
+    
+    # Input do CNPJ
+    cnpj = st.text_input("Informe o CNPJ da empresa (somente números):", 
+                        value=st.session_state.apuracao.cnpj_empresa or "")
+    
+    if cnpj:
+        # Validar CNPJ
+        if len(cnpj) == 14 and cnpj.isdigit():
+            st.session_state.apuracao.definir_cnpj_empresa(cnpj)
+            st.success("CNPJ válido e salvo com sucesso!")
+        else:
+            st.error("CNPJ inválido. Deve conter 14 dígitos numéricos.")
+    
+    # Período de apuração
+    st.subheader("Período de Apuração")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        data_inicio = st.date_input("Data inicial:", 
+                                  value=st.session_state.apuracao.periodo_inicio or datetime.today().replace(day=1))
+    
+    with col2:
+        data_fim = st.date_input("Data final:", 
+                               value=st.session_state.apuracao.periodo_fim or datetime.today())
+    
+    if st.button("Definir Período"):
+        st.session_state.apuracao.definir_periodo(data_inicio, data_fim)
+        st.success(f"Período definido: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
+    
+    # Upload de arquivos
+    st.subheader("Importar Arquivos")
+    uploaded_files = st.file_uploader("Selecione os arquivos XML ou ZIP contendo XMLs:", 
+                                    type=["xml", "zip"], 
+                                    accept_multiple_files=True)
+    
+    if uploaded_files and st.button("Processar Arquivos"):
+        with st.spinner("Processando arquivos..."):
+            notas_processadas, erros = processar_arquivos(uploaded_files, st.session_state.apuracao)
+            
+            if notas_processadas > 0:
+                st.success(f"{notas_processadas} nota(s) fiscal(is) processada(s) com sucesso!")
+            if erros > 0:
+                st.error(f"{erros} arquivo(s) com erro(s) no processamento.")
+    
+    # Resumo
+    if st.session_state.apuracao.notas:
+        mostrar_resumo_apuracao(st.session_state.apuracao)
+        
+        st.subheader("Últimas Notas Processadas")
+        ultimas_notas = st.session_state.apuracao.notas[-5:] if len(st.session_state.apuracao.notas) > 5 else st.session_state.apuracao.notas
+        for nota in reversed(ultimas_notas):
+            with st.expander(f"Nota {nota.chave} - {nota.data_emissao.strftime('%d/%m/%Y')}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Emitente:** {nota.emitente['nome']} ({nota.emitente['cnpj']})")
+                    st.write(f"**Destinatário:** {nota.destinatario['nome']} ({nota.destinatario['cnpj']})")
+                with col2:
+                    st.write(f"**Valor Total:** {formatar_moeda(nota.valor_total['vNF'])}")
+                    st.write(f"**Operação:** {'Saída' if nota.emitente['cnpj'] == st.session_state.apuracao.cnpj_empresa else 'Entrada'}")
+
+# Página de ICMS
+elif pagina == "ICMS":
+    st.title("Apuração de ICMS")
+    
+    if not st.session_state.apuracao.cnpj_empresa:
+        st.warning("Por favor, informe o CNPJ da empresa na página 'Importar XMLs' antes de prosseguir.")
+        st.stop()
+    
+    if not st.session_state.apuracao.notas:
+        st.warning("Nenhuma nota fiscal foi importada ainda. Por favor, importe os arquivos XML na página 'Importar XMLs'.")
+        st.stop()
+    
+    mostrar_resumo_apuracao(st.session_state.apuracao)
+    
+    # Cálculo do ICMS
+    resultado_icms = st.session_state.apuracao.calcular_icms()
+    
+    st.subheader("Resultado da Apuração")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric("Débito", formatar_moeda(resultado_icms['Débito']))
+    
+    with col2:
+        st.metric("Crédito", formatar_moeda(resultado_icms['Crédito']))
+    
+    with col3:
+        st.metric("Saldo", formatar_moeda(resultado_icms['Saldo']), 
+                delta_color="inverse" if resultado_icms['Saldo'] < 0 else "normal")
+    
+    with col4:
+        st.metric("ST", formatar_moeda(resultado_icms['ST']))
+    
+    with col5:
+        st.metric("DIFAL", formatar_moeda(resultado_icms['DIFAL']))
+    
+    # Detalhamento
+    st.subheader("Detalhamento por Nota Fiscal")
+    
+    # Filtrar por tipo de operação
+    tipo_operacao = st.radio("Filtrar por:", ["Todas", "Débito", "Crédito"], horizontal=True)
+    
+    # Criar DataFrame com os dados
+    dados = []
+    for nota in st.session_state.apuracao.notas:
+        if st.session_state.apuracao.periodo_inicio and st.session_state.apuracao.periodo_fim:
+            if not (st.session_state.apuracao.periodo_inicio <= nota.data_emissao.date() <= st.session_state.apuracao.periodo_fim):
+                continue
+        
+        if nota.emitente['cnpj'] == st.session_state.apuracao.cnpj_empresa:
+            tipo = "Débito"
+        else:
+            tipo = "Crédito"
+        
+        if tipo_operacao != "Todas" and tipo != tipo_operacao:
+            continue
+        
+        dados.append({
+            'Chave': nota.chave,
+            'Data': nota.data_emissao.strftime('%d/%m/%Y'),
+            'Emitente': nota.emitente['nome'],
+            'Destinatário': nota.destinatario['nome'],
+            'Tipo': tipo,
+            'Valor ICMS': nota.valor_total['vICMS'],
+            'Valor ST': nota.valor_total['vST'],
+            'Valor Total': nota.valor_total['vNF']
+        })
+    
+    df = pd.DataFrame(dados)
+    
+    if not df.empty:
+        # Formatar valores monetários
+        df['Valor ICMS'] = df['Valor ICMS'].apply(lambda x: formatar_moeda(x))
+        df['Valor ST'] = df['Valor ST'].apply(lambda x: formatar_moeda(x))
+        df['Valor Total'] = df['Valor Total'].apply(lambda x: formatar_moeda(x))
+        
+        st.dataframe(df, use_container_width=True)
+        
+        # Botão para exportar
+        csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        st.download_button(
+            label="Exportar para CSV",
+            data=csv,
+            file_name="apuracao_icms.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Nenhuma nota fiscal encontrada com os filtros selecionados.")
+
+# Página de IPI
+elif pagina == "IPI":
+    st.title("Apuração de IPI")
+    
+    if not st.session_state.apuracao.cnpj_empresa:
+        st.warning("Por favor, informe o CNPJ da empresa na página 'Importar XMLs' antes de prosseguir.")
+        st.stop()
+    
+    if not st.session_state.apuracao.notas:
+        st.warning("Nenhuma nota fiscal foi importada ainda. Por favor, importe os arquivos XML na página 'Importar XMLs'.")
+        st.stop()
+    
+    mostrar_resumo_apuracao(st.session_state.apuracao)
+    
+    # Cálculo do IPI
+    resultado_ipi = st.session_state.apuracao.calcular_ipi()
+    
+    st.subheader("Resultado da Apuração")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Débito", formatar_moeda(resultado_ipi['Débito']))
+    
+    with col2:
+        st.metric("Crédito", formatar_moeda(resultado_ipi['Crédito']))
+    
+    with col3:
+        st.metric("Saldo", formatar_moeda(resultado_ipi['Saldo']), 
+                delta_color="inverse" if resultado_ipi['Saldo'] < 0 else "normal")
+    
+    # Detalhamento
+    st.subheader("Detalhamento por Nota Fiscal")
+    
+    # Filtrar por tipo de operação
+    tipo_operacao = st.radio("Filtrar por:", ["Todas", "Débito", "Crédito"], horizontal=True)
+    
+    # Criar DataFrame com os dados
+    dados = []
+    for nota in st.session_state.apuracao.notas:
+        if st.session_state.apuracao.periodo_inicio and st.session_state.apuracao.periodo_fim:
+            if not (st.session_state.apuracao.periodo_inicio <= nota.data_emissao.date() <= st.session_state.apuracao.periodo_fim):
+                continue
+        
+        if nota.emitente['cnpj'] == st.session_state.apuracao.cnpj_empresa:
+            tipo = "Débito"
+        else:
+            tipo = "Crédito"
+        
+        if tipo_operacao != "Todas" and tipo != tipo_operacao:
+            continue
+        
+        dados.append({
+            'Chave': nota.chave,
+            'Data': nota.data_emissao.strftime('%d/%m/%Y'),
+            'Emitente': nota.emitente['nome'],
+            'Destinatário': nota.destinatario['nome'],
+            'Tipo': tipo,
+            'Valor IPI': nota.valor_total['vIPI'],
+            'Valor Total': nota.valor_total['vNF']
+        })
+    
+    df = pd.DataFrame(dados)
+    
+    if not df.empty:
+        # Formatar valores monetários
+        df['Valor IPI'] = df['Valor IPI'].apply(lambda x: formatar_moeda(x))
+        df['Valor Total'] = df['Valor Total'].apply(lambda x: formatar_moeda(x))
+        
+        st.dataframe(df, use_container_width=True)
+        
+        # Botão para exportar
+        csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        st.download_button(
+            label="Exportar para CSV",
+            data=csv,
+            file_name="apuracao_ipi.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Nenhuma nota fiscal encontrada com os filtros selecionados.")
+
+# Página de PIS
+elif pagina == "PIS":
+    st.title("Apuração de PIS")
+    
+    if not st.session_state.apuracao.cnpj_empresa:
+        st.warning("Por favor, informe o CNPJ da empresa na página 'Importar XMLs' antes de prosseguir.")
+        st.stop()
+    
+    if not st.session_state.apuracao.notas:
+        st.warning("Nenhuma nota fiscal foi importada ainda. Por favor, importe os arquivos XML na página 'Importar XMLs'.")
+        st.stop()
+    
+    mostrar_resumo_apuracao(st.session_state.apuracao)
+    
+    # Cálculo do PIS
+    resultado_pis = st.session_state.apuracao.calcular_pis()
+    
+    st.subheader("Resultado da Apuração")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Débito", formatar_moeda(resultado_pis['Débito']))
+    
+    with col2:
+        st.metric("Crédito", formatar_moeda(resultado_pis['Crédito']))
+    
+    with col3:
+        st.metric("Saldo", formatar_moeda(resultado_pis['Saldo']), 
+                delta_color="inverse" if resultado_pis['Saldo'] < 0 else "normal")
+    
+    # Detalhamento
+    st.subheader("Detalhamento por Nota Fiscal")
+    
+    # Filtrar por tipo de operação
+    tipo_operacao = st.radio("Filtrar por:", ["Todas", "Débito", "Crédito"], horizontal=True)
+    
+    # Criar DataFrame com os dados
+    dados = []
+    for nota in st.session_state.apuracao.notas:
+        if st.session_state.apuracao.periodo_inicio and st.session_state.apuracao.periodo_fim:
+            if not (st.session_state.apuracao.periodo_inicio <= nota.data_emissao.date() <= st.session_state.apuracao.periodo_fim):
+                continue
+        
+        if nota.emitente['cnpj'] == st.session_state.apuracao.cnpj_empresa:
+            tipo = "Débito"
+        else:
+            tipo = "Crédito"
+        
+        if tipo_operacao != "Todas" and tipo != tipo_operacao:
+            continue
+        
+        dados.append({
+            'Chave': nota.chave,
+            'Data': nota.data_emissao.strftime('%d/%m/%Y'),
+            'Emitente': nota.emitente['nome'],
+            'Destinatário': nota.destinatario['nome'],
+            'Tipo': tipo,
+            'Valor PIS': nota.valor_total['vPIS'],
+            'Valor Total': nota.valor_total['vNF']
+        })
+    
+    df = pd.DataFrame(dados)
+    
+    if not df.empty:
+        # Formatar valores monetários
+        df['Valor PIS'] = df['Valor PIS'].apply(lambda x: formatar_moeda(x))
+        df['Valor Total'] = df['Valor Total'].apply(lambda x: formatar_moeda(x))
+        
+        st.dataframe(df, use_container_width=True)
+        
+        # Botão para exportar
+        csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        st.download_button(
+            label="Exportar para CSV",
+            data=csv,
+            file_name="apuracao_pis.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Nenhuma nota fiscal encontrada com os filtros selecionados.")
+
+# Página de COFINS
+elif pagina == "COFINS":
+    st.title("Apuração de COFINS")
+    
+    if not st.session_state.apuracao.cnpj_empresa:
+        st.warning("Por favor, informe o CNPJ da empresa na página 'Importar XMLs' antes de prosseguir.")
+        st.stop()
+    
+    if not st.session_state.apuracao.notas:
+        st.warning("Nenhuma nota fiscal foi importada ainda. Por favor, importe os arquivos XML na página 'Importar XMLs'.")
+        st.stop()
+    
+    mostrar_resumo_apuracao(st.session_state.apuracao)
+    
+    # Cálculo do COFINS
+    resultado_cofins = st.session_state.apuracao.calcular_cofins()
+    
+    st.subheader("Resultado da Apuração")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Débito", formatar_moeda(resultado_cofins['Débito']))
+    
+    with col2:
+        st.metric("Crédito", formatar_moeda(resultado_cofins['Crédito']))
+    
+    with col3:
+        st.metric("Saldo", formatar_moeda(resultado_cofins['Saldo']), 
+                delta_color="inverse" if resultado_cofins['Saldo'] < 0 else "normal")
+    
+    # Detalhamento
+    st.subheader("Detalhamento por Nota Fiscal")
+    
+    # Filtrar por tipo de operação
+    tipo_operacao = st.radio("Filtrar por:", ["Todas", "Débito", "Crédito"], horizontal=True)
+    
+    # Criar DataFrame com os dados
+    dados = []
+    for nota in st.session_state.apuracao.notas:
+        if st.session_state.apuracao.periodo_inicio and st.session_state.apuracao.periodo_fim:
+            if not (st.session_state.apuracao.periodo_inicio <= nota.data_emissao.date() <= st.session_state.apuracao.periodo_fim):
+                continue
+        
+        if nota.emitente['cnpj'] == st.session_state.apuracao.cnpj_empresa:
+            tipo = "Débito"
+        else:
+            tipo = "Crédito"
+        
+        if tipo_operacao != "Todas" and tipo != tipo_operacao:
+            continue
+        
+        dados.append({
+            'Chave': nota.chave,
+            'Data': nota.data_emissao.strftime('%d/%m/%Y'),
+            'Emitente': nota.emitente['nome'],
+            'Destinatário': nota.destinatario['nome'],
+            'Tipo': tipo,
+            'Valor COFINS': nota.valor_total['vCOFINS'],
+            'Valor Total': nota.valor_total['vNF']
+        })
+    
+    df = pd.DataFrame(dados)
+    
+    if not df.empty:
+        # Formatar valores monetários
+        df['Valor COFINS'] = df['Valor COFINS'].apply(lambda x: formatar_moeda(x))
+        df['Valor Total'] = df['Valor Total'].apply(lambda x: formatar_moeda(x))
+        
+        st.dataframe(df, use_container_width=True)
+        
+        # Botão para exportar
+        csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        st.download_button(
+            label="Exportar para CSV",
+            data=csv,
+            file_name="apuracao_cofins.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Nenhuma nota fiscal encontrada com os filtros selecionados.")
