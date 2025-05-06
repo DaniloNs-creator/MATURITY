@@ -1,1007 +1,391 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import xml.etree.ElementTree as ET
+from datetime import datetime
+import os
+import base64
 from io import BytesIO
-import requests
-import plotly.graph_objects as go
-import base64  # Para converter imagens em base64
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
-import json  # Para salvar e carregar dados em formato JSON
+import zipfile
 
-st.set_page_config(layout='wide')
+# Configuração da página
+st.set_page_config(
+    page_title="Sistema de Apuração Fiscal",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Mapeamento das respostas de texto para valores numéricos
-mapeamento_respostas = {
-    "Selecione": 0,  # Adicionando "Selecione" como valor padrão
-    "Não Possui": 1,
-    "Insatisfatório": 2,
-    "Controlado": 3,
-    "Eficiente": 4,
-    "Otimizado": 5
+# CSS personalizado
+def local_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+# Criar arquivo CSS se não existir
+if not os.path.exists("style.css"):
+    with open("style.css", "w") as f:
+        f.write("""
+/* Estilos gerais */
+body {
+    font-family: 'Arial', sans-serif;
+    color: #333;
+    background-color: #f5f5f5;
 }
 
-# Verificar se o pacote kaleido está instalado
-try:
-    import kaleido
-except ImportError:
-    st.error("O pacote 'kaleido' é necessário para exportar gráficos como imagens. Por favor, instale-o executando: pip install -U kaleido")
-    st.stop()
+/* Cabeçalho */
+.header {
+    background-color: #2c3e50;
+    color: white;
+    padding: 1rem;
+    border-radius: 5px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
 
-# Função para salvar respostas no arquivo
-def salvar_respostas(nome, email, respostas):
-    try:
-        dados = {"nome": nome, "email": email, "respostas": respostas}
-        with open(f"respostas_{email}.json", "w") as arquivo:
-            json.dump(dados, arquivo)
-        st.success("Respostas salvas com sucesso! Você pode continuar mais tarde.")
-    except Exception as e:
-        st.error(f"Erro ao salvar respostas: {e}")
+/* Títulos */
+h1, h2, h3 {
+    color: #2c3e50;
+}
 
-# Função para carregar respostas do arquivo
-def carregar_respostas(email):
-    try:
-        with open(f"respostas_{email}.json", "r") as arquivo:
-            dados = json.load(arquivo)
-        return dados.get("respostas", {})
-    except FileNotFoundError:
-        st.warning("Nenhum progresso salvo encontrado para este e-mail.")
-        return {}
-    except Exception as e:
-        st.error(f"Erro ao carregar respostas: {e}")
-        return {}
+/* Abas */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 10px;
+}
 
-# Função para verificar se todas as perguntas obrigatórias foram respondidas
-def verificar_obrigatorias_preenchidas(grupo, perguntas_hierarquicas, perguntas_obrigatorias, respostas):
-    obrigatorias_no_grupo = [
-        subitem for subitem in perguntas_hierarquicas[grupo]["subitens"].keys()
-        if subitem in perguntas_obrigatorias
-    ]
-    todas_preenchidas = all(
-        respostas.get(subitem, "Selecione") != "Selecione"
-        for subitem in obrigatorias_no_grupo
-    )
-    return todas_preenchidas, obrigatorias_no_grupo
+.stTabs [data-baseweb="tab"] {
+    padding: 8px 20px;
+    border-radius: 4px 4px 0 0;
+    background-color: #ecf0f1;
+    transition: all 0.3s ease;
+}
 
-def calcular_porcentagem_grupo(grupo, perguntas_hierarquicas, respostas):
-    soma_respostas = sum(respostas[subitem] for subitem in perguntas_hierarquicas[grupo]["subitens"].keys())
-    num_perguntas = len(perguntas_hierarquicas[grupo]["subitens"])
-    valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-    return valor_percentual
+.stTabs [aria-selected="true"] {
+    background-color: #3498db !important;
+    color: white !important;
+}
 
-def exportar_questionario(respostas, perguntas_hierarquicas):
-    # Exportar apenas o questionário preenchido
-    linhas = []
-    for item, conteudo in perguntas_hierarquicas.items():
-        for subitem, subpergunta in conteudo["subitens"].items():
-            linhas.append({"Pergunta": subpergunta, "Resposta": respostas[subitem]})
+/* Cards */
+.card {
+    background-color: white;
+    border-radius: 5px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
 
-    df_respostas = pd.DataFrame(linhas)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_respostas.to_excel(writer, index=False, sheet_name='Questionário')
-    return output.getvalue()
+/* Botões */
+.stButton>button {
+    background-color: #3498db;
+    color: white;
+    border-radius: 4px;
+    border: none;
+    padding: 8px 16px;
+    transition: all 0.3s ease;
+}
 
-def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normalizado):
-    servidor_smtp = st.secrets["email_config"]["servidor_smtp"]
-    porta = st.secrets["email_config"]["porta"]
-    remetente = st.secrets["email_config"]["email"]
-    senha = st.secrets["email_config"]["password"]
+.stButton>button:hover {
+    background-color: #2980b9;
+}
 
-    # Configurar o email
-    msg = MIMEMultipart()
-    msg['From'] = remetente
-    msg['To'] = destinatario
-    msg['Subject'] = "Relatório de Análise"
+/* Tabelas */
+.dataframe {
+    width: 100%;
+}
 
-    # Mensagem de Relatório de Progresso
-    grupo_atual_nome = grupos[st.session_state.grupo_atual]
-    respostas_numericas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
-    soma_respostas = sum(respostas_numericas[subitem] for subitem in perguntas_hierarquicas[grupo_atual_nome]["subitens"].keys())
-    num_perguntas = len(perguntas_hierarquicas[grupo_atual_nome]["subitens"])
-    if num_perguntas > 0:
-        valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-        nivel_atual = ""
-        if valor_percentual < 26:
-            nivel_atual = "INICIAL"
-        elif valor_percentual < 51:
-            nivel_atual = "ORGANIZAÇÃO"
-        elif valor_percentual < 71:
-            nivel_atual = "CONSOLIDAÇÃO"
-        elif valor_percentual < 90:
-            nivel_atual = "OTIMIZAÇÃO"
-        elif valor_percentual >= 91:
-            nivel_atual = "EXCELÊNCIA"
+/* Sidebar */
+.sidebar .sidebar-content {
+    background-color: #2c3e50;
+    color: white;
+}
 
-        # Determinar os próximos blocos
-        proximos_blocos = grupos[st.session_state.grupo_atual + 1:] if st.session_state.grupo_atual + 1 < len(grupos) else []
-        proximos_blocos_texto = ", ".join(proximos_blocos) if proximos_blocos else "Nenhum bloco restante."
+/* Mensagens de sucesso */
+.stAlert {
+    border-radius: 5px;
+}
+""")
 
-        # Corpo do email com gráficos embutidos e mensagem de progresso
-        corpo = f"""
-        <p>Prezado(a) {st.session_state.nome},</p>
-        <p>Segue abaixo os gráficos de radar gerados pela Matriz de Maturidade:</p>
-        <p><b>Gráfico de Radar - Nível Atual:</b></p>
-        <img src="cid:fig_original" alt="Gráfico Original" style="width:600px;">
-        <p><b>Gráfico de Radar - Normalizado:</b></p>
-        <img src="cid:fig_normalizado" alt="Gráfico Normalizado" style="width:600px;">
-        <p>Em anexo, você encontrará o questionário preenchido.</p>
-        <hr>
-        <h3>Relatório de Progresso</h3>
-        <p>Você completou o Bloco <b>{grupo_atual_nome}</b>. Os resultados indicam que o seu nível de maturidade neste bloco é classificado como: <b>{nivel_atual}</b>.</p>
-        <p>Para aprofundarmos a análise e oferecermos insights mais estratégicos, recomendamos que você complete também:</p>
-        <p><b>{proximos_blocos_texto}</b></p>
-        <p>Nossos consultores especializados receberão este relatório e entrarão em contato para agendar uma discussão personalizada. Juntos, identificaremos oportunidades de melhoria e traçaremos os próximos passos para otimizar os processos da sua organização.</p>
-        """
-        msg.attach(MIMEText(corpo, 'html'))
+local_css("style.css")
 
-    # Anexar o arquivo do questionário
-    anexo = MIMEBase('application', 'octet-stream')
-    anexo.set_payload(arquivo_questionario)
-    encoders.encode_base64(anexo)
-    anexo.add_header('Content-Disposition', f'attachment; filename="questionario_preenchido.xlsx"')
-    msg.attach(anexo)
-
-    # Adicionar gráficos como imagens embutidas
-    try:
-        if fig_original is not None:
-            img_original = BytesIO()
-            fig_original.write_image(img_original, format="png", engine="kaleido")
-            img_original.seek(0)
-            img_original_mime = MIMEBase('image', 'png', filename="grafico_original.png")
-            img_original_mime.set_payload(img_original.read())
-            encoders.encode_base64(img_original_mime)
-            img_original_mime.add_header('Content-ID', '<fig_original>')
-            img_original_mime.add_header('Content-Disposition', 'inline', filename="grafico_original.png")
-            msg.attach(img_original_mime)
-        else:
-            raise ValueError("Gráfico Original não foi gerado.")
-
-        if fig_normalizado is not None:
-            img_normalizado = BytesIO()
-            fig_normalizado.write_image(img_normalizado, format="png", engine="kaleido")
-            img_normalizado.seek(0)
-            img_normalizado_mime = MIMEBase('image', 'png', filename="grafico_normalizado.png")
-            img_normalizado_mime.set_payload(img_normalizado.read())
-            encoders.encode_base64(img_normalizado_mime)
-            img_normalizado_mime.add_header('Content-ID', '<fig_normalizado>')
-            img_normalizado_mime.add_header('Content-Disposition', 'inline', filename="grafico_normalizado.png")
-            msg.attach(img_normalizado_mime)
-        else:
-            raise ValueError("Gráfico Normalizado não foi gerado.")
-    except Exception as e:
-        st.error(f"Erro ao gerar imagens dos gráficos: {e}")
-        return False
-
-    # Enviar o email com depuração detalhada
-    try:
-        with smtplib.SMTP(host=servidor_smtp, port=porta, timeout=10) as servidor:
-            servidor.set_debuglevel(1)  # Ativa logs detalhados
-            servidor.starttls()
-            servidor.login(remetente, senha)
-            servidor.send_message(msg)
-        return True
-    except Exception as e:
-        st.error(f"Erro detalhado: {str(e)}")
-        return False
-
-def gerar_graficos_radar(perguntas_hierarquicas, respostas):
-    respostas_numericas = {k: mapeamento_respostas[v] for k, v in respostas.items()}
-    categorias = []
-    valores = []
-    valores_normalizados = []
+# Função para exibir a capa
+def mostrar_capa():
+    st.markdown("""
+    <div class="header">
+        <h1 style="color:white; text-align:center;">Sistema de Apuração Fiscal</h1>
+        <h3 style="color:white; text-align:center;">ICMS | IPI | PIS | COFINS</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    for item, conteudo in perguntas_hierarquicas.items():
-        soma_respostas = sum(respostas_numericas[subitem] for subitem in conteudo["subitens"].keys())
-        num_perguntas = len(conteudo["subitens"])
-        if num_perguntas > 0:
-            valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-            valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
-            categorias.append(conteudo["titulo"])
-            valores.append(valor_percentual)
-            valores_normalizados.append(valor_normalizado)
-    
-    if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
-        st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
-        return None, None
-    
-    # Gráfico Original
-    valores_original = valores + valores[:1]
-    categorias_original = categorias + categorias[:1]
-    fig_original = go.Figure()
-    fig_original.add_trace(go.Scatterpolar(
-        r=valores_original,
-        theta=categorias_original,
-        fill='toself',
-        name='Gráfico Original'
-    ))
-    fig_original.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 100]
-            )),
-        showlegend=False,
-        title="Gráfico de Radar - Nível Atual"
-    )
-    
-    # Gráfico Normalizado
-    valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
-    fig_normalizado = go.Figure()
-    fig_normalizado.add_trace(go.Scatterpolar(
-        r=valores_normalizados_fechado,
-        theta=categorias_original,
-        fill='toself',
-        name='Gráfico Normalizado'
-    ))
-    fig_normalizado.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 100]
-            )),
-        showlegend=False,
-        title="Gráfico de Radar - Normalizado"
-    )
-    
-    return fig_original, fig_normalizado
-
-# Função para exibir a tabela de níveis de maturidade com destaque no nível atual
-def exibir_tabela_niveis_maturidade(nivel_atual):
-    niveis = [
-        {
-            "Nível": "INICIAL",
-            "Descrição": (
-                "A organização opera de forma desestruturada, sem processos claramente definidos ou formalizados. "
-                "As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, "
-                "tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada. "
-                "A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais "
-                "e elevado risco de não conformidade regulatória."
-            )
-        },
-        {
-            "Nível": "ORGANIZAÇÃO",
-            "Descrição": (
-                "A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada. "
-                "Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência "
-                "na execução continue limitada. As atividades ainda dependem fortemente da experiência individual, e a governança sobre "
-                "os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos."
-            )
-        },
-        {
-            "Nível": "CONSOLIDAÇÃO",
-            "Descrição": (
-                "Os processos são formalmente documentados e seguidos de maneira estruturada. Existe uma clareza maior sobre as responsabilidades "
-                "e papéis, o que reduz a dependência do conhecimento individual. A implementação de controles internos começa a ganhar robustez, "
-                "permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas. Indicadores de desempenho são introduzidos, permitindo "
-                "um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento."
-            )
-        },
-        {
-            "Nível": "OTIMIZAÇÃO",
-            "Descrição": (
-                "Os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho. "
-                "A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades. "
-                "A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional. "
-                "O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo."
-            )
-        },
-        {
-            "Nível": "EXCELÊNCIA",
-            "Descrição": (
-                "A organização alcança um nível de referência, caracterizado por uma cultura de melhoria contínua e inovação. Os processos são constantemente "
-                "avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico. Há uma integração "
-                "plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório. "
-                "O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor."
-            )
-        }
-    ]
-    # Adicionar uma coluna para destacar o nível atual
-    for nivel in niveis:
-        nivel["Atual"] = "✔️" if nivel["Nível"] == nivel_atual else ""
-
-    # Ajustar estilo da tabela para a coluna "Nível"
-    df_niveis = pd.DataFrame(niveis)
-    df_niveis = df_niveis.reset_index(drop=True)  # Remove a coluna de índice padrão (0, 1, 2, 3, 4)
-    styled_table = df_niveis.style.set_properties(
-        **{'font-size': '10px', 'white-space': 'nowrap'}, subset=['Nível']
-    )
-
-    st.write("### Tilha de Níveis de Maturidade")
-    st.table(styled_table)
-
-def mostrar_nivel_maturidade(total_porcentagem):
-    if total_porcentagem < 26:
-        nivel_atual = "INICIAL"
-        st.warning("SEU NÍVEL ATUAL É: INICIAL")
-        st.info("""
-        **NIVEL DE MATURIDADE INICIAL:** 
-        Neste estágio, a organização opera de forma desestruturada, sem processos claramente definidos ou formalizados. 
-        As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada. 
-        A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
-        """)
-    elif total_porcentagem < 51:
-        nivel_atual = "ORGANIZAÇÃO"
-        st.warning("SEU NÍVEL ATUAL É: ORGANIZAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE ORGANIZAÇÃO:** 
-        A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada. 
-        Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência na execução continue limitada. 
-        As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
-        """)
-    elif total_porcentagem < 71:
-        nivel_atual = "CONSOLIDAÇÃO"
-        st.warning("SEU NÍVEL ATUAL É: CONSOLIDAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE CONSOLIDAÇÃO:** 
-        A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada. 
-        Existe uma clareza maior sobre as responsabilidades e papéis, o que reduz a dependência do conhecimento individual. 
-        A implementação de controles internos começa a ganhar robustez, permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas. 
-        Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
-        """)
-    elif total_porcentagem < 90:
-        nivel_atual = "OTIMIZAÇÃO"
-        st.warning("SEU NÍVEL ATUAL É: OTIMIZAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE OTIMIZAÇÃO:** 
-        Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho. 
-        A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades. 
-        A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional. 
-        O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
-        """)
-    elif total_porcentagem >= 91:
-        nivel_atual = "EXCELÊNCIA"
-        st.success("SEU NÍVEL ATUAL É: EXCELÊNCIA")
-        st.info("""
-        **NIVEL DE MATURIDADE EXCELÊNCIA:** 
-        A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação. 
-        Os processos são constantemente avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico. 
-        Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório. 
-        O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
-        """)
-    
-    # Exibir a tabela de níveis de maturidade com o nível atual destacado
-    exibir_tabela_niveis_maturidade(nivel_atual)
-
-def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
-    if valor_percentual < 26:
-        nivel_atual = "INICIAL"
-        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: INICIAL")
-        st.info("""
-        **NIVEL DE MATURIDADE INICIAL:**
-        Neste estágio, a organização opera de forma desestruturada, sem processos claramente definidos ou formalizados.
-        As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada.
-        A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
-        """)
-    elif valor_percentual < 51:
-        nivel_atual = "ORGANIZAÇÃO"
-        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: ORGANIZAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE ORGANIZAÇÃO:**
-        A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada.
-        Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência na execução continue limitada.
-        As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
-        """)
-    elif valor_percentual < 71:
-        nivel_atual = "CONSOLIDAÇÃO"
-        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: CONSOLIDAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE CONSOLIDAÇÃO:**
-        A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada.
-        Existe uma clareza maior sobre as responsabilidades e papéis, o que reduz a dependência do conhecimento individual.
-        A implementação de controles internos começa a ganhar robustez, permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas.
-        Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
-        """)
-    elif valor_percentual < 90:
-        nivel_atual = "OTIMIZAÇÃO"
-        st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: OTIMIZAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE OTIMIZAÇÃO:**
-        Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho.
-        A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades.
-        A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional.
-        O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
-        """)
-    elif valor_percentual >= 91:
-        nivel_atual = "EXCELÊNCIA"
-        st.success(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: EXCELÊNCIA")
-        st.info("""
-        **NIVEL DE MATURIDADE EXCELÊNCIA:**
-        A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação.
-        Os processos são constantemente avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico.
-        Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório.
-        O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
-        """)
-    
-    # Exibir a tabela de níveis de maturidade com o nível atual destacado
-    exibir_tabela_niveis_maturidade(nivel_atual)
-
-def validar_nivel_maturidade(soma_percentual, total_porcentagem):
-    if soma_percentual < 26:
-        st.warning("SEU NÍVEL ATUAL É: INICIAL")
-        st.info("""
-        **NIVEL DE MATURIDADE INICIAL:**
-        Neste estágio, a organização opera de forma desestruturada, sem processos claramente definidos ou formalizados.
-        As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada.
-        A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
-        """)
-    elif soma_percentual < 51:
-        st.warning("SEU NÍVEL ATUAL É: ORGANIZAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE ORGANIZAÇÃO:**
-        A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada.
-        Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência na execução continue limitada.
-        As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
-        """)
-    elif soma_percentual < 71:
-        st.warning("SEU NÍVEL ATUAL É: CONSOLIDAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE CONSOLIDAÇÃO:**
-        A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada.
-        Existe uma clareza maior sobre as responsabilidades e papéis, o que reduz a dependência do conhecimento individual.
-        A implementação de controles internos começa a ganhar robustez, permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas.
-        Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
-        """)
-    elif soma_percentual < 90:
-        st.warning("SEU NÍVEL ATUAL É: OTIMIZAÇÃO")
-        st.info("""
-        **NIVEL DE MATURIDADE OTIMIZAÇÃO:**
-        Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho.
-        A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades.
-        A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional.
-        O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
-        """)
-    elif soma_percentual >= 91:
-        st.success("SEU NÍVEL ATUAL É: EXCELÊNCIA")
-        st.info("""
-        **NIVEL DE MATURIDADE EXCELÊNCIA:**
-        A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação.
-        Os processos são constantemente avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico.
-        Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório.
-        O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
-        """)
-
-if "formulario_preenchido" not in st.session_state:
-    st.session_state.formulario_preenchido = False
-if "grupo_atual" not in st.session_state:
-    st.session_state.grupo_atual = 0
-if "respostas" not in st.session_state:
-    st.session_state.respostas = {}
-if "mostrar_graficos" not in st.session_state:
-    st.session_state.mostrar_graficos = False
-
-# Inicializar as variáveis fig_original e fig_normalizado para evitar erros
-fig_original = None
-fig_normalizado = None
-
-if not st.session_state.formulario_preenchido:
-    # Adicionando a imagem no início com tamanho reduzido
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png", width=300)
-        st.header("DIAGNÓSTICO DE GESTÃO, GOVERNANÇA E CONTROLES")  # Título ajustado para menor tamanho
-        st.subheader("Por favor, preencha suas informações abaixo:")
-        nome = st.text_input("Nome")
-        email = st.text_input("E-mail")
-        empresa = st.text_input("Empresa")
-        telefone = st.text_input("Telefone")
-        if st.button("Prosseguir"):
-            if nome and email and empresa and telefone:
-                st.session_state.nome = nome
-                st.session_state.email = email
-                st.session_state.empresa = empresa
-                st.session_state.telefone = telefone
-                st.session_state.formulario_preenchido = True
-
-                # Carregar respostas salvas, se existirem
-                st.session_state.respostas = carregar_respostas(email)
-                st.success("Informações preenchidas com sucesso! Você pode prosseguir para o questionário.")
-            else:
-                st.error("Por favor, preencha todos os campos antes de prosseguir.")
-
-            # Adicionar explicação em formato de tópicos abaixo do botão "Prosseguir"
-            st.markdown("""
-            Com esta ferramenta de diagnóstico, você poderá avaliar o nível de maturidade da sua empresa em três dimensões estratégicas:
-            - **Gestão**:
-                - Estrutura organizacional
-                - Eficiência financeira
-            - **Governança**:
-                - Gestão de processos
-                - Gestão de riscos
-                - Conformidade regulatória (compliance)
-                - Efetividade do canal de denúncias
-            - **Áreas Operacionais**:
-                - Recursos Humanos
-                - Tecnologia da Informação
-                - Gestão de compras e estoques
-                - Contabilidade e controles financeiros
-                - Logística e distribuição
-            """)
-            st.markdown("""
-            A análise integrada desses aspectos permitirá identificar pontos fortes, oportunidades de melhoria e priorizar ações para o crescimento sustentável do negócio.
-            """)
-            
+    col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/foto.jpg", use_container_width=True)
-else:
-    url_arquivo = "https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/FOMULARIO.txt"
+        st.image("https://cdn-icons-png.flaticon.com/512/477/477103.png", width=200)
+    
+    st.markdown("""
+    <div style="text-align:center; margin-top:2rem;">
+        <p>Este sistema permite a apuração dos impostos ICMS, IPI, PIS e COFINS com base nos arquivos XMLs das notas fiscais.</p>
+        <p>Desenvolvido de acordo com os manuais da EFD ICMS IPI e EFD Contribuições.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Funções para processamento dos XMLs
+def parse_xml(xml_file):
     try:
-        response = requests.get(url_arquivo)
-        response.raise_for_status()
-
-        # Inicializar as variáveis para evitar erros
-        categorias = []
-        valores = []
-        valores_normalizados = []
-
-        lines = response.text.splitlines()
-        data = []
-        grupo_atual = None
-        for line in lines:
-            parts = line.strip().split(';')
-            if len(parts) >= 2:
-                classe = parts[0].strip()
-                pergunta = parts[1].strip()
-
-                if classe.isdigit():
-                    grupo_atual = f"{classe} - {pergunta}"
-                else:
-                    if grupo_atual:
-                        data.append({'grupo': grupo_atual, 'classe': classe, 'pergunta': pergunta})
-
-        perguntas_df = pd.DataFrame(data)
-
-        if perguntas_df.empty or not {'grupo', 'classe', 'pergunta'}.issubset(perguntas_df.columns):
-            st.error("Certifique-se de que o arquivo TXT contém as colunas 'grupo', 'classe' e 'pergunta'.")
-            st.write("Conteúdo do arquivo processado:", perguntas_df.head())
-        else:
-            perguntas_hierarquicas = {}
-            for _, row in perguntas_df.iterrows():
-                grupo = row['grupo']
-                classe = str(row['classe'])
-                pergunta = row['pergunta']
-
-                if grupo not in perguntas_hierarquicas:
-                    perguntas_hierarquicas[grupo] = {"titulo": grupo, "subitens": {}}
-
-                perguntas_hierarquicas[grupo]["subitens"][classe] = pergunta
-
-            grupos = list(perguntas_hierarquicas.keys())
-            
-            # Criando navegação por grupos
-            with st.sidebar:
-               
-                # Corrigindo o caminho da imagem para o URL bruto do GitHub
-                st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png")
-                st.title("Navegação por Grupos")
-                
-                tab1, tab2, tab3 = st.tabs([ "GESTÃO", "GOVERNANÇA", "SETORES"])
-                
-                
-                
-                with tab1:
-                    if st.button("**Estruturas**" if st.session_state.grupo_atual == 1 else "Estruturas"):
-                        st.session_state.grupo_atual = 1
-                    if st.button("**Eficiência de Gestão**" if st.session_state.grupo_atual == 0 else "Eficiência de Gestão"):
-                        st.session_state.grupo_atual = 0
-                
-                with tab2:
-                    if st.button("**Gestão de Processos**" if st.session_state.grupo_atual == 2 else "Gestão de Processos"):
-                        st.session_state.grupo_atual = 2
-                    if st.button("**Gestão de Riscos**" if st.session_state.grupo_atual == 3 else "Gestão de Riscos"):
-                        st.session_state.grupo_atual = 3
-                    if st.button("**Compliance**" if st.session_state.grupo_atual == 4 else "Compliance"):
-                        st.session_state.grupo_atual = 4
-                    if st.button("**Canal de Denúncias**" if st.session_state.grupo_atual == 5 else "Canal de Denúncias"):
-                        st.session_state.grupo_atual = 5
-                    if st.button("**Governança Corporativa**" if st.session_state.grupo_atual == 6 else "Governança Corporativa"):
-                        st.session_state.grupo_atual = 6
-                
-                with tab3:
-                    if st.button("**Recursos Humanos**" if st.session_state.grupo_atual == 7 else "Recursos Humanos"):
-                        st.session_state.grupo_atual = 7
-                    if st.button("**Tecnologia da Informação**" if st.session_state.grupo_atual == 8 else "Tecnologia da Informação"):
-                        st.session_state.grupo_atual = 8
-                    if st.button("**Compras**" if st.session_state.grupo_atual == 9 else "Compras"):
-                        st.session_state.grupo_atual = 9
-                    if st.button("**Estoques**" if st.session_state.grupo_atual == 10 else "Estoques"):
-                        st.session_state.grupo_atual = 10
-                    if st.button("**Contabilidade e Controle Financeiro**" if st.session_state.grupo_atual == 11 else "Contabilidade e Controle Financeiro"):
-                        st.session_state.grupo_atual = 11
-                    if st.button("**Logística e Distribuição**" if st.session_state.grupo_atual == 12 else "Logística e Distribuição"):
-                        st.session_state.grupo_atual = 12
-
-                # Adicionar texto explicativo abaixo dos botões
-                st.write("""
-                Para garantir uma análise mais eficiente e resultados mais assertivos, recomendamos iniciar o diagnóstico pela aba 'Gestão', respondendo aos dois blocos de questões relacionados. 
-                Em seguida, prossiga para 'Governança' e, por fim, 'Setores'. 
-
-                No entanto, caso prefira, você pode navegar diretamente para qualquer aba específica de acordo com suas prioridades ou áreas de interesse imediato.
-                """)
-
-            grupo_atual = st.session_state.grupo_atual
-
-            # Textos introdutórios para cada grupo
-            TEXTO_GRUPO1 = """
-            O preenchimento de uma Matriz de Maturidade de Gestão Financeira é essencial para avaliar a eficiência dos processos financeiros, identificar lacunas e estruturar um plano de melhoria contínua. Ela permite medir o nível de controle sobre orçamento, fluxo de caixa, investimentos e riscos, fornecendo uma visão clara da saúde financeira da empresa. Além disso, facilita a tomada de decisões estratégicas, ajudando a mitigar riscos, otimizar recursos e garantir a sustentabilidade do negócio a longo prazo. Empresas que utilizam essa matriz conseguem se adaptar melhor a mudanças e aprimorar sua competitividade.
-            """
-            TEXTO_GRUPO2 = """
-            A avaliação da maturidade da estrutura de uma organização é um processo essencial para entender o nível de desenvolvimento e a eficácia das práticas de governança, gestão de riscos, compliance e processos organizacionais. Trata-se de um diagnóstico completo que permite identificar pontos fortes, fragilidades e oportunidades de melhoria em diferentes áreas estratégicas.
-            """
-            TEXTO_GRUPO3 = """
-            O preenchimento desta seção permite avaliar a maturidade do programa de Compliance, garantindo que a organização esteja em conformidade com regulamentações e boas práticas éticas. Ajuda a prevenir riscos legais, fortalecer a cultura organizacional e demonstrar compromisso com a integridade corporativa.
-            """
-            TEXTO_GRUPO4 = """
-            Responder a estas perguntas auxilia na identificação, monitoramento e mitigação de riscos que podem impactar a operação. Com uma gestão de riscos eficiente, a empresa minimiza perdas, melhora a tomada de decisão e se prepara para desafios internos e externos, garantindo maior resiliência operacional.
-            """
-            TEXTO_GRUPO5 = """
-            Esta seção permite avaliar a eficiência e a padronização dos processos internos. Um bom gerenciamento de processos melhora a produtividade, reduz desperdícios e assegura entregas consistentes. Além disso, facilita a implementação de melhorias contínuas e a adaptação a novas exigências do mercado.
-            """
-            TEXTO_GRUPO6 = """
-            A governança bem estruturada assegura transparência, ética e eficiência na gestão da empresa. Com este diagnóstico, é possível fortalecer a tomada de decisão, alinhar os interesses das partes interessadas e garantir um crescimento sustentável, reduzindo riscos e aumentando a confiança dos stakeholders.
-            """
-            TEXTO_GRUPO7 = """
-            Esta seção mede a maturidade da gestão de pessoas, garantindo que a empresa valorize seus colaboradores e mantenha um ambiente produtivo e inclusivo. Um RH eficiente melhora a retenção de talentos, impulsiona a inovação e alinha os funcionários à cultura e estratégia organizacional.
-            """
-            TEXTO_GRUPO8 = """
-            Responder a estas perguntas ajuda a avaliar o nível de digitalização e segurança da empresa. Uma TI bem estruturada melhora a eficiência operacional, protege dados sensíveis e impulsiona a inovação, garantindo que a organização esteja preparada para desafios tecnológicos e competitivos.
-            """
-            TEXTO_GRUPO9 = """
-            Esta seção permite identificar boas práticas e oportunidades de melhoria na gestão financeira. Com um controle eficiente, a empresa assegura sustentabilidade, reduz riscos de inadimplência e fraudes, melhora a liquidez e otimiza investimentos, garantindo saúde financeira e crescimento sustentável.
-            """
-            TEXTO_GRUPO10 = """
-            O diagnóstico nesta área assegura que as compras sejam estratégicas, alinhadas às necessidades da empresa e aos melhores preços e prazos. Com processos estruturados, a organização reduz custos, melhora a qualidade dos insumos e fortalece a relação com fornecedores confiáveis.
-            """
-            TEXTO_GRUPO11 = """
-            Avaliar a gestão de estoques permite reduzir desperdícios, evitar faltas e garantir uma operação eficiente. Com controle adequado, a empresa melhora a previsibilidade, reduz custos de armazenagem e assegura disponibilidade de produtos, otimizando o fluxo operacional.
-            """
-            TEXTO_GRUPO12 = """
-            Responder a estas perguntas possibilita otimizar a cadeia logística, garantindo entregas ágeis e redução de custos operacionais. Um bom planejamento melhora o nível de serviço, evita atrasos e assegura eficiência no transporte, impactando positivamente a satisfação do cliente.
-            """
-            TEXTO_GRUPO13 = """
-            Esta seção avalia a transparência e conformidade da contabilidade empresarial. Um controle rigoroso das demonstrações financeiras assegura a correta apuração de resultados, garantindo confiança e credibilidade junto a investidores e órgãos reguladores.
-            """
-
-            # Lista de perguntas obrigatórias
-            perguntas_obrigatorias = [
-                "1.02", "1.06", "1.42", "1.03", "1.13", "1.14", "1.30", "1.12", "1.19", "1.25", "1.41", "1.43", "1.27", "1.35", "1.45", "1.20",
-                "2.10", "2.01", "2.16", "2.23", "2.05", "2.08", "2.25", "2.29", "2.21", "2.22",
-                "3.01", "3.04", "3.08", "3.11", "3.29", "3.38", "3.40", "3.42", "3.43",
-                "4.01", "4.02", "4.03", "4.04", "4.05", "4.06", "4.07", "4.08", "4.09","4.10",
-                "5.01", "5.03", "5.04", "5.07", "5.10", "5.32", "5.35", "5.40"
-                "6.01", "6.02", "6.03", "6.04", "6.05", "6.06", "6.07", "6.08", "6.09","6.10", "6.11", "6.12",
-                "7.01", "7.02", "7.03", "7.04", "7.05", "7.06", "7.07", "7.08", "7.09","7.10",
-                "8.01", "8.02", "8.03", "8.04", "8.05", "8.06", "8.07", "8.08", "8.09","8.10","8.11","8.12","8.13","8.14","8.15","8.16","8.17",
-                "9.01", "9.02", "9.03", "9.04", "9.05", "9.06", "9.07", "9.08", "9.09","9.10",
-                "10.01", "10.02", "10.03", "10.04", "10.05", "10.06", "10.07", "10.08","10.09","10.10",
-                "11.01", "11.02", "11.03", "11.04", "11.05", "11.06", "11.07", "11.08","11.09","11.10",
-                "12.01", "12.02", "12.03", "12.04", "12.05", "12.06", "12.07", "12.08","12.09","12.10",
-                "13.01", "13.02", "13.03", "13.04", "13.05", "13.06", "13.07", "13.08","13.09","13.10"
-            ]
-
-            # Grupos obrigatórios (4, 6, 7, 8, 9, 10, 11, 12, 13)
-            grupos_obrigatorios = [
-                "4 - Gestão de Riscos",
-                "6 - Governança Corporativa",
-                "7 - Recursos Humanos",
-                "8 - Tecnologia da Informação",
-                "9 - Compras",
-                "10 - Estoques",
-                "11 - Contabilidade e Controle Financeiro",
-                "12 - Logística e Distribuição",
-                "13 - Contabilidade e Controle Financeiro"
-            ]
-
-            if grupo_atual < len(grupos):
-                grupo = grupos[grupo_atual]
-
-                # Exibe o texto introdutório correspondente ao grupo atual
-                if grupo.startswith("1 -"):
-                    st.markdown(TEXTO_GRUPO1)
-                elif grupo.startswith("2 -"):
-                    st.markdown(TEXTO_GRUPO2)
-                elif grupo.startswith("3 -"):
-                    st.markdown(TEXTO_GRUPO3)
-                elif grupo.startswith("4 -"):
-                    st.markdown(TEXTO_GRUPO4)
-                elif grupo.startswith("5 -"):
-                    st.markdown(TEXTO_GRUPO5)
-                elif grupo.startswith("6 -"):
-                    st.markdown(TEXTO_GRUPO6)
-                elif grupo.startswith("7 -"):
-                    st.markdown(TEXTO_GRUPO7)
-                elif grupo.startswith("8 -"):
-                    st.markdown(TEXTO_GRUPO8)
-                elif grupo.startswith("9 -"):
-                    st.markdown(TEXTO_GRUPO9)
-                elif grupo.startswith("10 -"):
-                    st.markdown(TEXTO_GRUPO10)
-                elif grupo.startswith("11 -"):
-                    st.markdown(TEXTO_GRUPO11)
-                elif grupo.startswith("12 -"):
-                    st.markdown(TEXTO_GRUPO12)
-                elif grupo.startswith("13 -"):
-                    st.markdown(TEXTO_GRUPO13)
-
-                st.write(f"### {perguntas_hierarquicas[grupo]['titulo']}")
-                
-                # Verifica se todas as perguntas obrigatórias foram respondidas
-                todas_obrigatorias_preenchidas = True
-                obrigatorias_no_grupo = []
-                
-                for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
-                    if subitem in perguntas_obrigatorias:
-                        obrigatorias_no_grupo.append(subitem)
-                        if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
-                            todas_obrigatorias_preenchidas = False
-
-                # Adicionando verificações para evitar erros ao acessar chaves inexistentes
-                for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
-                    if subitem not in st.session_state.respostas:
-                        st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
-
-                for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
-                    if subitem not in st.session_state.respostas:
-                        st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
-
-                # Dividindo as perguntas em blocos de 10
-                subitens = list(perguntas_hierarquicas[grupo]["subitens"].items())
-                blocos = [subitens[i:i + 10] for i in range(0, len(subitens), 10)]
-
-                for idx, bloco in enumerate(blocos):
-                    with st.expander(f"Bloco {idx + 1} de perguntas"):
-                        for subitem, subpergunta in bloco:
-                            if subitem in perguntas_obrigatorias:
-                                pergunta_label = f"**:red[{subitem} - {subpergunta}]** (OBRIGATÓRIO)"  # Destaca em vermelho
-                            else:
-                                pergunta_label = f"{subitem} - {subpergunta}"
-
-                            resposta = st.selectbox(
-                                pergunta_label,
-                                options=list(mapeamento_respostas.keys()),
-                                index=list(mapeamento_respostas.keys()).index(st.session_state.respostas[subitem])
-                            )
-                            st.session_state.respostas[subitem] = resposta
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button("Voltar"):
-                        if st.session_state.grupo_atual > 0:
-                            st.session_state.grupo_atual -= 1
-                            st.session_state.mostrar_graficos = False
-                with col2:
-                    if st.button("Prosseguir"):
-                        # Verifica se todas as perguntas obrigatórias do grupo atual foram respondidas
-                        obrigatorias_no_grupo = [
-                            subitem for subitem in perguntas_hierarquicas[grupo]["subitens"].keys()
-                            if subitem in perguntas_obrigatorias
-                        ]
-                        todas_obrigatorias_preenchidas = all(
-                            st.session_state.respostas.get(subitem, "Selecione") != "Selecione"
-                            for subitem in obrigatorias_no_grupo
-                        )
-
-                        if not todas_obrigatorias_preenchidas:
-                            st.error(f"Por favor, responda todas as perguntas obrigatórias deste grupo antes de prosseguir: {', '.join(obrigatorias_no_grupo)}")
-                        else:
-                            # Avança para o próximo grupo
-                            st.session_state.grupo_atual += 1
-                            st.session_state.mostrar_graficos = False
-                            st.success("Você avançou para o próximo grupo.")
-                with col3:
-                    if st.button("Salvar Progresso"):
-                        salvar_respostas(st.session_state.nome, st.session_state.email, st.session_state.respostas)
-                    if st.button("Gerar Gráficos"):
-                        st.session_state.mostrar_graficos = True
-
-                    # Adicionar botão "ENVIAR POR EMAIL" ao lado do botão "Gerar Gráficos"
-                    if st.session_state.mostrar_graficos:
-                        fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
-                        if fig_original is None or fig_normalizado is None:
-                            st.error("Os gráficos não foram gerados corretamente. Verifique os dados de entrada.")
-                        else:
-                            if st.button("ENVIAR POR EMAIL"):
-                                excel_data = exportar_questionario(st.session_state.respostas, perguntas_hierarquicas)
-                                if enviar_email(st.session_state.email, excel_data, fig_original, fig_normalizado):
-                                    st.success("Relatório enviado com sucesso para o email informado!")
-
-                if st.session_state.mostrar_graficos:
-                    # Mensagem de Relatório de Progresso
-                    grupo_atual_nome = grupos[st.session_state.grupo_atual]
-                    respostas_numericas = {k: mapeamento_respostas[v] for k, v in st.session_state.respostas.items()}
-                    soma_respostas = sum(respostas_numericas[subitem] for subitem in perguntas_hierarquicas[grupo_atual_nome]["subitens"].keys())
-                    num_perguntas = len(perguntas_hierarquicas[grupo_atual_nome]["subitens"])
-                    if num_perguntas > 0:
-                        valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-                        nivel_atual = ""
-                        if valor_percentual < 26:
-                            nivel_atual = "INICIAL"
-                        elif valor_percentual < 51:
-                            nivel_atual = "ORGANIZAÇÃO"
-                        elif valor_percentual < 71:
-                            nivel_atual = "CONSOLIDAÇÃO"
-                        elif valor_percentual < 90:
-                            nivel_atual = "OTIMIZAÇÃO"
-                        elif valor_percentual >= 91:
-                            nivel_atual = "EXCELÊNCIA"
-
-                        # Determinar os próximos blocos
-                        proximos_blocos = grupos[st.session_state.grupo_atual + 1:] if st.session_state.grupo_atual + 1 < len(grupos) else []
-                        proximos_blocos_texto = ", ".join(proximos_blocos) if proximos_blocos else "Nenhum bloco restante."
-
-                        # Exibir a mensagem
-                        st.markdown(f"""
-                        ### Relatório de Progresso
-
-                        Você completou o Bloco **{grupo_atual_nome}**. Os resultados indicam que o seu nível de maturidade neste bloco é classificado como: **{nivel_atual}**.
-
-                        Para aprofundarmos a análise e oferecermos insights mais estratégicos, recomendamos que você complete também:
-
-                        **{proximos_blocos_texto}**
-
-                        Nossos consultores especializados receberão este relatório e entrarão em contato para agendar uma discussão personalizada. Juntos, identificaremos oportunidades de melhoria e traçaremos os próximos passos para otimizar os processos da sua organização.
-                        """)
-
-                    # Gerar gráficos
-                    fig_original, fig_normalizado = gerar_graficos_radar(perguntas_hierarquicas, st.session_state.respostas)
-                    if fig_original and fig_normalizado:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.plotly_chart(fig_original, use_container_width=True)
-                        with col2:
-                            st.plotly_chart(fig_normalizado, use_container_width=True)
-
-                        # Calcular e exibir o nível atual apenas para o grupo atual
-                        mostrar_nivel_atual_por_grupo(grupo_atual_nome, valor_percentual)
-            else:
-                st.write("### Todas as perguntas foram respondidas!")
-                if st.button("Gerar Gráfico Final"):
-                    # Verifica se todas as perguntas obrigatórias foram respondidas
-                    todas_obrigatorias_respondidas = True
-                    obrigatorias_nao_respondidas = []
-                    
-                    for pergunta in perguntas_obrigatorias:
-                        if pergunta not in st.session_state.respostas or st.session_state.respostas.get(pergunta, "Selecione") == "Selecione":
-                            todas_obrigatorias_respondidas = False
-                            obrigatorias_nao_respondidas.append(pergunta)
-                    
-                    # Verifica se todos os grupos obrigatórios foram completamente respondidos
-                    grupos_obrigatorios_completos = True
-                    grupos_incompletos = []
-                    
-                    for grupo_obrigatorio in grupos_obrigatorios:
-                        if grupo_obrigatorio in perguntas_hierarquicas:
-                            for subitem in perguntas_hierarquicas[grupo_obrigatorio]["subitens"].keys():
-                                if subitem not in st.session_state.respostas or st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
-                                    grupos_obrigatorios_completos = False
-                                    grupos_incompletos.append(grupo_obrigatorio)
-                                    break
-                    
-                    if not todas_obrigatorias_respondidas or not grupos_obrigatorios_completos:
-                        mensagem_erro = []
-                        if not todas_obrigatorias_respondidas:
-                            mensagem_erro.append(f"Perguntas obrigatórias não respondidas: {', '.join(obrigatorias_nao_respondidas)}")
-                        if not grupos_obrigatorios_completos:
-                            mensagem_erro.append(f"Grupos obrigatórios incompletos: {', '.join(set(grupos_incompletos))}")
-                        st.error(" | ".join(mensagem_erro))
-                    else:
-                        # Adicionando logs para depuração
-                        try:
-                            respostas = {k: mapeamento_respostas.get(v, 0) for k, v in st.session_state.respostas.items()}
-                            categorias = []
-                            valores = []
-                            valores_normalizados = []
-                            soma_total_respostas = sum(respostas.values())
-                            for item, conteudo in perguntas_hierarquicas.items():
-                                soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
-                                num_perguntas = len(conteudo["subitens"])
-                                if num_perguntas > 0:
-                                    valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-                                    valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
-                                    categorias.append(conteudo["titulo"])
-                                    valores.append(valor_percentual)
-                                    valores_normalizados.append(valor_normalizado)
-                            if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
-                                st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
-                            else:
-                                if categorias:
-                                    valores_original = valores + valores[:1]
-                                    categorias_original = categorias + categorias[:1]
-                                    fig_original = go.Figure()
-                                    fig_original.add_trace(go.Scatterpolar(
-                                        r=valores_original,
-                                        theta=categorias_original,
-                                        fill='toself',
-                                        name='Gráfico Original'
-                                    ))
-                                    fig_original.update_layout(
-                                        polar=dict(
-                                            radialaxis=dict(
-                                                visible=True,
-                                                range=[0, 100]
-                                            )),
-                                        showlegend=False
-                                    )
-                                    valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
-                                    fig_normalizado = go.Figure()
-                                    fig_normalizado.add_trace(go.Scatterpolar(
-                                        r=valores_normalizados_fechado,
-                                        theta=categorias_original,
-                                        fill='toself',
-                                        name='Gráfico Normalizado'
-                                    ))
-                                    fig_normalizado.update_layout(
-                                        polar=dict(
-                                            radialaxis=dict(
-                                                visible=True,
-                                                range=[0, 100]
-                                            )),
-                                        showlegend=False
-                                    )
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        st.plotly_chart(fig_original, use_container_width=True)
-                                        st.write("### Gráfico 1")
-                                        df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-                                        total_porcentagem = df_grafico_original['Porcentagem'].sum()
-                                        df_grafico_original.loc['Total'] = ['Total', total_porcentagem]
-                                        st.dataframe(df_grafico_original)
-
-                                        if total_porcentagem < 26:
-                                            st.warning("SEU NIVEL É INICIAL")
-                                        elif total_porcentagem < 51:
-                                            st.warning("SEU NIVEL É ORGANIZAÇÃO")
-                                        elif total_porcentagem < 71:
-                                            st.warning("SEU NIVEL É CONSOLIDAÇÃO")
-                                        elif total_porcentagem < 90:
-                                            st.warning("SEU NIVEL É OTIMIZAÇÃO")
-                                        elif total_porcentagem >= 91:
-                                            st.success("SEU NIVEL É EXCELÊNCIA")
-                                    with col2:
-                                        st.plotly_chart(fig_normalizado, use_container_width=True)
-                                        st.write("### Gráfico 2")
-                                        df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
-                                        st.dataframe(df_grafico_normalizado)
-                                    
-                                    # Mostrar nível de maturidade completo
-                                    mostrar_nivel_maturidade(total_porcentagem)
-                                    
-                                    excel_data = exportar_questionario(st.session_state.respostas, perguntas_hierarquicas)
-                                    st.download_button(
-                                        label="Exportar para Excel",
-                                        data=excel_data,
-                                        file_name="questionario_preenchido.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    )
-                        except KeyError as e:
-                            st.error(f"Erro ao acessar chave inexistente: {e}")
-                            st.write("Estado atual das respostas:", st.session_state.respostas)
-                            st.write("Perguntas obrigatórias:", perguntas_obrigatorias)
-                            st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+        
+        # Namespaces comuns em XMLs de NFe
+        ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
+        
+        # Extrair informações básicas
+        inf_nfe = root.find('.//nfe:infNFe', ns)
+        if inf_nfe is None:
+            ns = {'': 'http://www.portalfiscal.inf.br/nfe'}
+            inf_nfe = root.find('.//infNFe', ns)
+        
+        ide = inf_nfe.find('.//nfe:ide', ns) or inf_nfe.find('.//ide', ns)
+        emit = inf_nfe.find('.//nfe:emit', ns) or inf_nfe.find('.//emit', ns)
+        dest = inf_nfe.find('.//nfe:dest', ns) or inf_nfe.find('.//dest', ns)
+        total = inf_nfe.find('.//nfe:total', ns) or inf_nfe.find('.//total', ns)
+        
+        # Extrair valores dos impostos
+        icms_total = total.find('.//nfe:ICMSTot', ns) or total.find('.//ICMSTot', ns)
+        ipi_total = total.find('.//nfe:IPITot', ns) or total.find('.//IPITot', ns)
+        pis_total = total.find('.//nfe:PISTot', ns) or total.find('.//PISTot', ns)
+        cofins_total = total.find('.//nfe:COFINSTot', ns) or total.find('.//COFINSTot', ns)
+        
+        # Criar dicionário com os dados
+        dados = {
+            'Chave_NFe': inf_nfe.get('Id', '')[3:] if 'Id' in inf_nfe.attrib else '',
+            'Numero': ide.find('.//nfe:nNF', ns).text if ide.find('.//nfe:nNF', ns) is not None else ide.find('.//nNF', ns).text,
+            'Data_Emissao': ide.find('.//nfe:dhEmi', ns).text if ide.find('.//nfe:dhEmi', ns) is not None else ide.find('.//dhEmi', ns).text,
+            'Emitente_CNPJ': emit.find('.//nfe:CNPJ', ns).text if emit.find('.//nfe:CNPJ', ns) is not None else emit.find('.//CNPJ', ns).text,
+            'Emitente_Nome': emit.find('.//nfe:xNome', ns).text if emit.find('.//nfe:xNome', ns) is not None else emit.find('.//xNome', ns).text,
+            'Destinatario_CNPJ': dest.find('.//nfe:CNPJ', ns).text if dest.find('.//nfe:CNPJ', ns) is not None else (dest.find('.//nfe:CPF', ns).text if dest.find('.//nfe:CPF', ns) is not None else ''),
+            'Destinatario_Nome': dest.find('.//nfe:xNome', ns).text if dest.find('.//nfe:xNome', ns) is not None else dest.find('.//xNome', ns).text,
+            'Valor_Total': total.find('.//nfe:vNF', ns).text if total.find('.//nfe:vNF', ns) is not None else total.find('.//vNF', ns).text,
+            'Valor_ICMS': icms_total.find('.//nfe:vICMS', ns).text if icms_total is not None and icms_total.find('.//nfe:vICMS', ns) is not None else (icms_total.find('.//vICMS', ns).text if icms_total is not None and icms_total.find('.//vICMS', ns) is not None else '0'),
+            'Valor_IPI': ipi_total.find('.//nfe:vIPI', ns).text if ipi_total is not None and ipi_total.find('.//nfe:vIPI', ns) is not None else (ipi_total.find('.//vIPI', ns).text if ipi_total is not None and ipi_total.find('.//vIPI', ns) is not None else '0'),
+            'Valor_PIS': pis_total.find('.//nfe:vPIS', ns).text if pis_total is not None and pis_total.find('.//nfe:vPIS', ns) is not None else (pis_total.find('.//vPIS', ns).text if pis_total is not None and pis_total.find('.//vPIS', ns) is not None else '0'),
+            'Valor_COFINS': cofins_total.find('.//nfe:vCOFINS', ns).text if cofins_total is not None and cofins_total.find('.//nfe:vCOFINS', ns) is not None else (cofins_total.find('.//vCOFINS', ns).text if cofins_total is not None and cofins_total.find('.//vCOFINS', ns) is not None else '0'),
+        }
+        
+        return dados
     except Exception as e:
-        st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
+        st.error(f"Erro ao processar o arquivo {xml_file.name}: {str(e)}")
+        return None
 
-# Garantir que perguntas_hierarquicas esteja definido
-if 'perguntas_hierarquicas' not in locals():
-    perguntas_hierarquicas = {}
+def processar_arquivos(uploaded_files):
+    dados = []
+    for uploaded_file in uploaded_files:
+        if uploaded_file.name.endswith('.xml'):
+            dados_xml = parse_xml(uploaded_file)
+            if dados_xml:
+                dados.append(dados_xml)
+        elif uploaded_file.name.endswith('.zip'):
+            with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith('.xml'):
+                        with zip_ref.open(file_info) as xml_file:
+                            dados_xml = parse_xml(BytesIO(xml_file.read()))
+                            if dados_xml:
+                                dados.append(dados_xml)
+    
+    if dados:
+        df = pd.DataFrame(dados)
+        
+        # Converter valores para float
+        colunas_valores = ['Valor_Total', 'Valor_ICMS', 'Valor_IPI', 'Valor_PIS', 'Valor_COFINS']
+        for col in colunas_valores:
+            df[col] = df[col].astype(float)
+        
+        # Converter data
+        df['Data_Emissao'] = pd.to_datetime(df['Data_Emissao']).dt.date
+        
+        return df
+    else:
+        return None
 
-# Garantir que perguntas_obrigatorias esteja definido
-if 'perguntas_obrigatorias' not in locals():
-    perguntas_obrigatorias = []
+# Funções para cálculos fiscais
+def calcular_icms(df):
+    if df is None or df.empty:
+        return None
+    
+    # Agrupar por mês/ano
+    df['Periodo'] = df['Data_Emissao'].apply(lambda x: x.strftime('%m/%Y'))
+    
+    # Calcular totais
+    resumo_icms = df.groupby('Periodo').agg({
+        'Valor_Total': 'sum',
+        'Valor_ICMS': 'sum'
+    }).reset_index()
+    
+    # Adicionar cálculos específicos do ICMS conforme manual EFD ICMS IPI
+    resumo_icms['ICMS_Devido'] = resumo_icms['Valor_ICMS']
+    resumo_icms['ICMS_Retido'] = 0  # Exemplo, pode ser calculado com base em outras informações
+    resumo_icms['ICMS_Diferencial'] = 0  # Exemplo para alíquotas diferencial
+    resumo_icms['ICMS_ST'] = 0  # Exemplo para substituição tributária
+    resumo_icms['ICMS_Total'] = resumo_icms['ICMS_Devido'] + resumo_icms['ICMS_ST'] - resumo_icms['ICMS_Retido']
+    
+    return resumo_icms
 
-# Garantir que todas as perguntas obrigatórias sejam inicializadas no dicionário de respostas
-for grupo, conteudo in perguntas_hierarquicas.items():
-    for subitem in conteudo["subitens"].keys():
-        if subitem not in st.session_state.respostas:
-            st.session_state.respostas[subitem] = "Selecione"  # Inicializa com "Selecione"
+def calcular_ipi(df):
+    if df is None or df.empty:
+        return None
+    
+    df['Periodo'] = df['Data_Emissao'].apply(lambda x: x.strftime('%m/%Y'))
+    
+    resumo_ipi = df.groupby('Periodo').agg({
+        'Valor_Total': 'sum',
+        'Valor_IPI': 'sum'
+    }).reset_index()
+    
+    # Adicionar cálculos específicos do IPI
+    resumo_ipi['IPI_Devido'] = resumo_ipi['Valor_IPI']
+    resumo_ipi['IPI_Creditos'] = 0  # Exemplo de créditos
+    resumo_ipi['IPI_Total'] = resumo_ipi['IPI_Devido'] - resumo_ipi['IPI_Creditos']
+    
+    return resumo_ipi
 
-# Adicionando verificações para evitar erros ao acessar chaves inexistentes
-try:
-    respostas = {k: mapeamento_respostas.get(v, 0) for k, v in st.session_state.respostas.items()}
-except KeyError as e:
-    st.error(f"Erro ao acessar chave inexistente: {e}")
-    st.write("Estado atual das respostas:", st.session_state.respostas)
-    st.write("Perguntas hierárquicas:", perguntas_hierarquicas)
+def calcular_pis_cofins(df, tipo='PIS'):
+    if df is None or df.empty:
+        return None
+    
+    coluna = 'Valor_PIS' if tipo == 'PIS' else 'Valor_COFINS'
+    
+    df['Periodo'] = df['Data_Emissao'].apply(lambda x: x.strftime('%m/%Y'))
+    
+    resumo = df.groupby('Periodo').agg({
+        'Valor_Total': 'sum',
+        coluna: 'sum'
+    }).reset_index()
+    
+    # Adicionar cálculos específicos conforme manual EFD Contribuições
+    resumo[f'{tipo}_Devido'] = resumo[coluna]
+    resumo[f'{tipo}_Creditos'] = 0  # Exemplo de créditos
+    resumo[f'{tipo}_Total'] = resumo[f'{tipo}_Devido'] - resumo[f'{tipo}_Creditos']
+    
+    return resumo
+
+# Função para download dos resultados
+def get_table_download_link(df, filename):
+    csv = df.to_csv(index=False, sep=';', decimal=',')
+    b64 = base64.b64encode(csv.encode()).decode()
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Baixar arquivo CSV</a>'
+    return href
+
+# Interface principal
+def main():
+    # Mostrar capa inicial
+    mostrar_capa()
+    
+    # Upload de arquivos
+    st.sidebar.header("Configurações")
+    uploaded_files = st.sidebar.file_uploader(
+        "Carregue os arquivos XML ou ZIP com XMLs", 
+        type=['xml', 'zip'], 
+        accept_multiple_files=True
+    )
+    
+    if uploaded_files:
+        with st.spinner('Processando arquivos...'):
+            df = processar_arquivos(uploaded_files)
+        
+        if df is not None:
+            st.success(f"{len(df)} notas fiscais processadas com sucesso!")
+            
+            # Exibir abas para cada imposto
+            tab1, tab2, tab3, tab4 = st.tabs(["ICMS", "IPI", "PIS", "COFINS"])
+            
+            with tab1:
+                st.header("Apuração de ICMS")
+                resumo_icms = calcular_icms(df)
+                
+                if resumo_icms is not None:
+                    # Formatar valores em R$
+                    for col in resumo_icms.columns:
+                        if col != 'Periodo':
+                            resumo_icms[col] = resumo_icms[col].apply(lambda x: f'R$ {x:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.'))
+                    
+                    st.dataframe(resumo_icms, use_container_width=True)
+                    
+                    # Gráfico
+                    st.subheader("Evolução Mensal do ICMS")
+                    df_graf = calcular_icms(df)
+                    df_graf['Periodo'] = pd.to_datetime(df_graf['Periodo'], format='%m/%Y')
+                    st.line_chart(df_graf.set_index('Periodo')['ICMS_Total'])
+                    
+                    # Download
+                    st.markdown(get_table_download_link(resumo_icms, "apuracao_icms.csv"), unsafe_allow_html=True)
+            
+            with tab2:
+                st.header("Apuração de IPI")
+                resumo_ipi = calcular_ipi(df)
+                
+                if resumo_ipi is not None:
+                    # Formatar valores em R$
+                    for col in resumo_ipi.columns:
+                        if col != 'Periodo':
+                            resumo_ipi[col] = resumo_ipi[col].apply(lambda x: f'R$ {x:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.'))
+                    
+                    st.dataframe(resumo_ipi, use_container_width=True)
+                    
+                    # Gráfico
+                    st.subheader("Evolução Mensal do IPI")
+                    df_graf = calcular_ipi(df)
+                    df_graf['Periodo'] = pd.to_datetime(df_graf['Periodo'], format='%m/%Y')
+                    st.line_chart(df_graf.set_index('Periodo')['IPI_Total'])
+                    
+                    # Download
+                    st.markdown(get_table_download_link(resumo_ipi, "apuracao_ipi.csv"), unsafe_allow_html=True)
+            
+            with tab3:
+                st.header("Apuração de PIS")
+                resumo_pis = calcular_pis_cofins(df, 'PIS')
+                
+                if resumo_pis is not None:
+                    # Formatar valores em R$
+                    for col in resumo_pis.columns:
+                        if col != 'Periodo':
+                            resumo_pis[col] = resumo_pis[col].apply(lambda x: f'R$ {x:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.'))
+                    
+                    st.dataframe(resumo_pis, use_container_width=True)
+                    
+                    # Gráfico
+                    st.subheader("Evolução Mensal do PIS")
+                    df_graf = calcular_pis_cofins(df, 'PIS')
+                    df_graf['Periodo'] = pd.to_datetime(df_graf['Periodo'], format='%m/%Y')
+                    st.line_chart(df_graf.set_index('Periodo')['PIS_Total'])
+                    
+                    # Download
+                    st.markdown(get_table_download_link(resumo_pis, "apuracao_pis.csv"), unsafe_allow_html=True)
+            
+            with tab4:
+                st.header("Apuração de COFINS")
+                resumo_cofins = calcular_pis_cofins(df, 'COFINS')
+                
+                if resumo_cofins is not None:
+                    # Formatar valores em R$
+                    for col in resumo_cofins.columns:
+                        if col != 'Periodo':
+                            resumo_cofins[col] = resumo_cofins[col].apply(lambda x: f'R$ {x:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.'))
+                    
+                    st.dataframe(resumo_cofins, use_container_width=True)
+                    
+                    # Gráfico
+                    st.subheader("Evolução Mensal do COFINS")
+                    df_graf = calcular_pis_cofins(df, 'COFINS')
+                    df_graf['Periodo'] = pd.to_datetime(df_graf['Periodo'], format='%m/%Y')
+                    st.line_chart(df_graf.set_index('Periodo')['COFINS_Total'])
+                    
+                    # Download
+                    st.markdown(get_table_download_link(resumo_cofins, "apuracao_cofins.csv"), unsafe_allow_html=True)
+            
+            # Exibir dados brutos
+            st.sidebar.subheader("Dados das Notas Fiscais")
+            if st.sidebar.checkbox("Mostrar dados completos"):
+                st.subheader("Dados Completos das Notas Fiscais")
+                st.dataframe(df, use_container_width=True)
+                
+                # Download dos dados completos
+                st.sidebar.markdown(get_table_download_link(df, "dados_completos_nf.csv"), unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
