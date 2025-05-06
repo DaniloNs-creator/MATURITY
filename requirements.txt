@@ -1,8 +1,4 @@
-xlsxwriter>=3.1.0
-matplotlib==3.8.2
-kaleido>=0.2.1
-requests>=2.0.0
-python-dotenv==1.0.0
+streamlit==1.31.0
 pandas==2.0.3
 lxml==5.0.0
 os==0.1.4
@@ -12,5 +8,3 @@ zipfile==3.1.2
 io==1.0.2
 tempfile==2.4.0
 plotly==5.20.0
-cssutils==2.7.1
-python-dateutil==2.8.2
