@@ -12,3 +12,5 @@ zipfile==3.1.2
 io==1.0.2
 tempfile==2.4.0
 plotly==5.20.0
+cssutils==2.7.1
+python-dateutil==2.8.2
