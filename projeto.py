@@ -1,622 +1,454 @@
-import pandas as pd
-import os
 import streamlit as st
-from streamlit.components.v1 import html
-import glob
-import time
-import io
-from pathlib import Path
+import pandas as pd
+import numpy as np
+import plotly.express as px
+from datetime import datetime, timedelta
+import base64
+from io import BytesIO
 
-# Configuração da página para remover a barra lateral
+# Configuração da página
 st.set_page_config(
-    page_title="Consolidador de Planilhas",
-    page_icon="📊",
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    page_title="PerformanceFit - Controle de Treinos",
+    page_icon="🚴‍♂️",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# CSS personalizado com animações e efeitos profissionais
-custom_css = """
-<style>
-[data-testid="stSidebar"] {
-    display: none !important;
+# CSS embutido diretamente no código
+def inject_css():
+    st.markdown("""
+    <style>
+        /* Estilos gerais */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+            background-color: #f5f7fa;
+        }
+
+        /* Cabeçalho */
+        .stApp header {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            padding: 1rem;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Sidebar */
+        .stSidebar {
+            background: linear-gradient(180deg, #ffffff, #f8f9fa);
+            padding: 1rem;
+            border-right: 1px solid #e1e5eb;
+        }
+
+        .user-profile {
+            animation: fadeIn 1s ease-in-out;
+        }
+
+        .profile-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1rem;
+            transition: transform 0.3s ease;
+        }
+
+        .profile-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Cards de refeição */
+        .meal-option {
+            background: white;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            border-left: 4px solid #2a5298;
+        }
+
+        .meal-option:hover {
+            background: #f8f9fa;
+            transform: translateX(5px);
+        }
+
+        /* Abas */
+        .stTabs [aria-selected="true"] {
+            font-weight: bold;
+            color: #1e3c72 !important;
+        }
+
+        .stTabs [aria-selected="true"]:after {
+            content: '';
+            display: block;
+            width: 100%;
+            height: 3px;
+            background: #1e3c72;
+            margin-top: 5px;
+            animation: expand 0.3s ease-out;
+        }
+
+        /* Rodapé */
+        .footer {
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        /* Animações */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes expand {
+            from { width: 0; }
+            to { width: 100%; }
+        }
+
+        /* Botões */
+        .stButton>button {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 0.5rem 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .stButton>button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Tabelas */
+        .stDataFrame {
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Card de treino do dia */
+        .workout-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8eb 100%);
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            border-left: 5px solid #2a5298;
+        }
+        
+        /* Calendário */
+        .stDateInput>div>div>input {
+            font-size: 1rem;
+            padding: 0.5rem;
+        }
+        
+        .date-picker-container {
+            margin-bottom: 1.5rem;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Injetar CSS
+inject_css()
+
+# Dados do usuário
+user_data = {
+    "nome": "Usuário",
+    "idade": 28,
+    "altura": 1.87,
+    "peso": 108,
+    "v02max": 173,
+    "objetivo": "Emagrecimento e Performance no Ciclismo",
+    "nivel": "Iniciante",
+    "disponibilidade": "6 dias/semana"
 }
 
-[data-testid="collapsedControl"] {
-    display: none !important;
-}
-
-@keyframes gradientBG {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
-
-@keyframes float {
-    0% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-    100% { transform: translateY(0px); }
-}
-
-@keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
-    70% { box-shadow: 0 0 0 15px rgba(76, 175, 80, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
-}
-
-body {
-    background: linear-gradient(270deg, #e8f5e9, #c8e6c9, #a5d6a7, #81c784);
-    background-size: 400% 400%;
-    animation: gradientBG 15s ease infinite;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 0;
-    padding: 0;
-}
-
-.stApp {
-    background-color: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(10px);
-    border-radius: 20px;
-    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
-    padding: 2.5rem;
-    max-width: 850px;
-    margin: 2rem auto;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    animation: float 6s ease-in-out infinite;
-}
-
-.stButton>button {
-    background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
-    color: white;
-    border: none;
-    padding: 18px 36px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 18px;
-    margin: 8px 0;
-    cursor: pointer;
-    border-radius: 30px;
-    transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
-    box-shadow: 0 6px 12px rgba(46, 125, 50, 0.3);
-    font-weight: 600;
-    width: 100%;
-    max-width: 350px;
-    position: relative;
-    overflow: hidden;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    z-index: 1;
-}
-
-.stButton>button:hover {
-    background: linear-gradient(135deg, #43A047 0%, #1B5E20 100%);
-    transform: translateY(-5px) scale(1.02);
-    box-shadow: 0 12px 20px rgba(46, 125, 50, 0.4);
-    animation: pulse 1.5s infinite;
-}
-
-.stButton>button:active {
-    transform: translateY(2px) scale(0.98);
-    box-shadow: 0 4px 8px rgba(46, 125, 50, 0.4);
-    transition: all 0.1s;
-}
-
-.stButton>button:after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 5px;
-    height: 5px;
-    background: rgba(255, 255, 255, 0.5);
-    opacity: 0;
-    border-radius: 100%;
-    transform: scale(1, 1) translate(-50%);
-    transform-origin: 50% 50%;
-    z-index: -1;
-}
-
-.stButton>button:focus:not(:active)::after {
-    animation: ripple 1s ease-out;
-}
-
-@keyframes ripple {
-    0% {
-        transform: scale(0, 0);
-        opacity: 0.5;
+# Zonas de frequência cardíaca baseadas no VO2max
+def calculate_zones(v02max):
+    return {
+        "Z1 (Recuperação)": (0.50 * v02max, 0.60 * v02max),
+        "Z2 (Aeróbico)": (0.60 * v02max, 0.70 * v02max),
+        "Z3 (Tempo)": (0.70 * v02max, 0.80 * v02max),
+        "Z4 (Limiar)": (0.80 * v02max, 0.90 * v02max),
+        "Z5 (VO2 Max)": (0.90 * v02max, 1.00 * v02max)
     }
-    100% {
-        transform: scale(50, 50);
-        opacity: 0;
+
+zones = calculate_zones(user_data["v02max"])
+
+# Dieta baseada em alimentos acessíveis
+diet_plan = {
+    "Café da Manhã": {
+        "Opção 1": "3 ovos + 2 fatias pão integral + 1 banana + 1 colher aveia",
+        "Opção 2": "Vitamina (200ml leite + 1 banana + 1 colher aveia + 1 colher chia)",
+        "Opção 3": "2 fatias pão integral + queijo cottage + 1 fruta"
+    },
+    "Lanche da Manhã": {
+        "Opção 1": "1 fruta + 10 castanhas",
+        "Opção 2": "1 iogurte natural + 1 colher linhaça",
+        "Opção 3": "1 fatia pão integral + 1 colher pasta amendoim"
+    },
+    "Almoço": {
+        "Opção 1": "1 concha arroz + 1 concha feijão + 150g frango + salada",
+        "Opção 2": "2 batatas médias + 150g carne moída + legumes refogados",
+        "Opção 3": "1 concha arroz integral + 150g peixe + brócolis cozido"
+    },
+    "Lanche da Tarde": {
+        "Opção 1": "1 ovo cozido + 1 torrada integral",
+        "Opção 2": "1 copo de vitamina (leite + fruta)",
+        "Opção 3": "1 iogurte + 1 colher granola caseira"
+    },
+    "Jantar": {
+        "Opção 1": "Omelete (3 ovos) + salada + 1 fatia pão integral",
+        "Opção 2": "150g carne + purê de abóbora + salada",
+        "Opção 3": "Sopa de legumes com frango desfiado"
+    },
+    "Ceia": {
+        "Opção 1": "1 copo leite morno",
+        "Opção 2": "1 iogurte natural",
+        "Opção 3": "1 fatia queijo branco"
     }
 }
 
-.stButton>button::before {
-    content: '';
-    position: absolute;
-    top: -2px;
-    left: -2px;
-    right: -2px;
-    bottom: -2px;
-    z-index: -2;
-    background: linear-gradient(135deg, #4CAF50, #81C784, #A5D6A7, #C8E6C9);
-    background-size: 400%;
-    border-radius: 32px;
-    opacity: 0;
-    transition: 0.5s;
-}
-
-.stButton>button:hover::before {
-    opacity: 1;
-    animation: gradientBG 3s linear infinite;
-}
-
-.title {
-    color: #2E7D32;
-    text-align: center;
-    margin-bottom: 2.5rem;
-    font-weight: 800;
-    font-size: 2.5rem;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-    position: relative;
-    display: inline-block;
-    width: 100%;
-}
-
-.title::after {
-    content: '';
-    display: block;
-    width: 100px;
-    height: 4px;
-    background: linear-gradient(90deg, #4CAF50, transparent);
-    margin: 10px auto;
-    border-radius: 2px;
-}
-
-.success-message {
-    background: linear-gradient(135deg, rgba(200, 230, 201, 0.9), rgba(165, 214, 167, 0.9));
-    color: #1B5E20;
-    padding: 1.5rem;
-    border-radius: 12px;
-    text-align: center;
-    margin-top: 1.5rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    border-left: 5px solid #2E7D32;
-    animation: slideIn 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
-    transform-origin: top center;
-}
-
-@keyframes slideIn {
-    0% {
-        opacity: 0;
-        transform: perspective(500px) rotateX(-30deg) translateY(-20px);
-    }
-    100% {
-        opacity: 1;
-        transform: perspective(500px) rotateX(0deg) translateY(0);
-    }
-}
-
-.card {
-    transition: all 0.3s ease;
-    cursor: pointer;
-}
-
-.card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1);
-}
-
-.stSpinner>div>div {
-    border-color: #4CAF50 transparent transparent transparent !important;
-}
-
-.tooltip {
-    position: relative;
-    display: inline-block;
-}
-
-.tooltip .tooltiptext {
-    visibility: hidden;
-    width: 200px;
-    background-color: #2E7D32;
-    color: #fff;
-    text-align: center;
-    border-radius: 6px;
-    padding: 10px;
-    position: absolute;
-    z-index: 1;
-    bottom: 125%;
-    left: 50%;
-    transform: translateX(-50%);
-    opacity: 0;
-    transition: opacity 0.3s;
-    font-size: 14px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-.tooltip:hover .tooltiptext {
-    visibility: visible;
-    opacity: 1;
-}
-
-.progress-container {
-    width: 100%;
-    height: 6px;
-    background: #e0e0e0;
-    border-radius: 3px;
-    margin-top: 10px;
-    overflow: hidden;
-}
-
-.progress-bar {
-    height: 100%;
-    background: linear-gradient(90deg, #4CAF50, #81C784);
-    border-radius: 3px;
-    width: 0%;
-    transition: width 0.3s ease;
-    animation: progressAnimation 2s ease-in-out infinite;
-}
-
-@keyframes progressAnimation {
-    0% { width: 0%; }
-    50% { width: 100%; }
-    100% { width: 0%; left: 100%; }
-}
-
-.button-loading .progress-container {
-    display: block;
-}
-
-.button-loading button {
-    pointer-events: none;
-    opacity: 0.8;
-}
-
-.button-to-progress {
-    transition: all 0.5s ease;
-    height: 60px;
-    padding: 0 !important;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-}
-
-.button-to-progress::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
-    width: var(--progress-width, 0%);
-    transition: width 0.3s ease;
-}
-
-.button-to-progress span {
-    position: relative;
-    z-index: 1;
-    color: white;
-}
-
-.btn-extrair {
-    background: linear-gradient(135deg, #FF5722 0%, #E64A19 100%) !important;
-    box-shadow: 0 6px 12px rgba(230, 74, 25, 0.3) !important;
-}
-
-.btn-extrair:hover {
-    background: linear-gradient(135deg, #F4511E 0%, #D84315 100%) !important;
-    box-shadow: 0 12px 20px rgba(230, 74, 25, 0.4) !important;
-}
-
-@media (max-width: 768px) {
-    .stApp {
-        padding: 1.5rem;
-        margin: 1rem;
-        border-radius: 15px;
-    }
+# Plano de treino de 60 dias
+def generate_workout_plan(start_date):
+    plan = []
+    current_date = start_date
     
-    .title {
-        font-size: 2rem;
-    }
-    
-    .stButton>button {
-        padding: 15px 30px;
-        font-size: 16px;
-    }
-}
-
-.contas-sem-depara-info {
-    background: rgba(255, 243, 224, 0.8);
-    border-left: 4px solid #FF9800;
-    padding: 1rem;
-    border-radius: 0 8px 8px 0;
-    margin: 1.5rem 0;
-    font-size: 0.95rem;
-}
-</style>
-"""
-
-# Função para obter o caminho da pasta Documents do usuário
-def get_user_documents_path():
-    return str(Path.home() / "Documents")
-
-# Função para ler arquivos de uma pasta
-def ler_arquivos_pasta(pasta, extensoes=['*.xlsx', '*.xls', '*.csv']):
-    arquivos = []
-    for ext in extensoes:
-        arquivos.extend(glob.glob(os.path.join(pasta, ext)))
-    return arquivos
-
-# Função para criar um arquivo Excel em memória
-def criar_excel_em_memoria(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Contas sem depara')
-    output.seek(0)
-    return output
-
-# Função para processar as planilhas
-def processar_planilhas(progress_bar, button_placeholder):
-    try:
-        # Obter o caminho da pasta Documents do usuário
-        documents_path = get_user_documents_path()
-        
-        # Caminhos das pastas
-        import_path = os.path.join(documents_path, 'import')
-        import2_path = os.path.join(documents_path, 'import2')
-        download_path = os.path.join(documents_path, 'download')
-        
-        # Atualizar progresso
-        progress_bar.progress(5, text="Criando pasta de destino...")
-        time.sleep(0.5)
-        
-        # Criar pasta download se não existir
-        os.makedirs(download_path, exist_ok=True)
-        
-        # Verificar se as pastas existem
-        if not os.path.exists(import_path):
-            st.error(f"Pasta não encontrada: {import_path}")
-            return None, None
-        if not os.path.exists(import2_path):
-            st.error(f"Pasta não encontrada: {import2_path}")
-            return None, None
-        
-        progress_bar.progress(15, text="Lendo arquivos da pasta import...")
-        time.sleep(0.5)
-        
-        # Ler arquivos da pasta import
-        import_files = ler_arquivos_pasta(import_path)
-        if not import_files:
-            st.error(f"Nenhuma planilha encontrada na pasta: {import_path}")
-            return None, None
-        
-        # Ler e concatenar todas as planilhas da pasta import
-        dfs_import = []
-        total_files = len(import_files)
-        
-        for i, filename in enumerate(import_files):
-            try:
-                progress_percent = 15 + int((i / total_files) * 30)
-                progress_bar.progress(progress_percent, text=f"Processando arquivo {i+1} de {total_files}...")
-                
-                if filename.endswith('.csv'):
-                    df = pd.read_csv(filename)
-                else:
-                    df = pd.read_excel(filename)
-                
-                # Verificar se as colunas necessárias existem
-                required_cols = ['Data', 'conta', 'valor', 'valor2']
-                if not all(col in df.columns for col in required_cols):
-                    st.warning(f"Arquivo {os.path.basename(filename)} não contém todas as colunas necessárias {required_cols}")
-                    continue
-                
-                dfs_import.append(df[required_cols])
-            except Exception as e:
-                st.warning(f"Erro ao ler arquivo {filename}: {str(e)}")
-                continue
-        
-        if not dfs_import:
-            st.error("Nenhum arquivo válido encontrado na pasta import")
-            return None, None
-        
-        progress_bar.progress(50, text="Concatenando dados...")
-        time.sleep(0.5)
-        
-        df_import = pd.concat(dfs_import, ignore_index=True)
-        
-        progress_bar.progress(60, text="Lendo arquivos da pasta import2...")
-        time.sleep(0.5)
-        
-        # Ler arquivos da pasta import2
-        import2_files = ler_arquivos_pasta(import2_path)
-        if not import2_files:
-            st.error(f"Nenhuma planilha encontrada na pasta: {import2_path}")
-            return None, None
-        
-        # Ler a primeira planilha encontrada na pasta import2
-        filename = import2_files[0]
-        try:
-            if filename.endswith('.csv'):
-                df_import2 = pd.read_csv(filename)
-            else:
-                df_import2 = pd.read_excel(filename)
-        except Exception as e:
-            st.error(f"Erro ao ler arquivo {filename}: {str(e)}")
-            return None, None
-        
-        # Verificar se as colunas necessárias existem
-        if not all(col in df_import2.columns for col in ['conta', 'conta contabil']):
-            st.error(f"Arquivo {os.path.basename(filename)} não contém as colunas necessárias ('conta', 'conta contabil')")
-            return None, None
-        
-        progress_bar.progress(70, text="Mesclando dados...")
-        time.sleep(0.5)
-        
-        # Fazer o merge das planilhas
-        df_final = pd.merge(
-            df_import,
-            df_import2[['conta', 'conta contabil']],
-            on='conta',
-            how='left'
-        )
-        
-        # Criar dataframe com contas sem depara (NAN)
-        contas_sem_depara = df_final[df_final['conta contabil'].isna()].copy()
-        contas_sem_depara = contas_sem_depara[['conta', 'Data', 'valor', 'valor2']]
-        contas_sem_depara = contas_sem_depara.drop_duplicates(subset=['conta'])
-        
-        progress_bar.progress(80, text="Processando colunas...")
-        time.sleep(0.5)
-        
-        # Selecionar e renomear colunas
-        df_final = df_final[['Data', 'conta contabil', 'valor', 'valor2']]
-        df_final.columns = ['Data', 'conta contabil', 'valor', 'valor2']
-        
-        # Remover os pontos da coluna 'conta contabil'
-        df_final['conta contabil'] = df_final['conta contabil'].astype(str).str.replace('.', '', regex=False)
-        
-        # Remover linhas com conta contabil vazia
-        df_final = df_final.dropna(subset=['conta contabil'])
-        
-        progress_bar.progress(90, text="Salvando arquivos...")
-        time.sleep(0.5)
-        
-        # Salvar a planilha consolidada em arquivos de 1000 linhas cada
-        total_linhas = len(df_final)
-        num_arquivos = (total_linhas // 1000) + (1 if total_linhas % 1000 != 0 else 0)
-        
-        for i in range(num_arquivos):
-            inicio = i * 1000
-            fim = (i + 1) * 1000
-            parte = df_final.iloc[inicio:fim]
+    for week in range(1, 9):  # 8 semanas = ~60 dias
+        for day in range(1, 7):  # 6 dias de treino por semana
+            if day == 1:  # Segunda-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Endurance",
+                    "Duração": "1h15min",
+                    "Zona FC": "Z2 (Aeróbico)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z2 (Aeróbico)'][1])} bpm",
+                    "Descrição": "Pedal constante em terreno plano, mantendo FC na Z2"
+                }
+            elif day == 2:  # Terça-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Membros Inferiores",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"
+                }
+            elif day == 3:  # Quarta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Intervalado",
+                    "Duração": "1h",
+                    "Zona FC": "Z4-Z5 (Limiar-VO2)",
+                    "FC Alvo": f"{int(zones['Z4 (Limiar)'][0])}-{int(zones['Z5 (VO2 Max)'][1])} bpm",
+                    "Descrição": "8x (2min Z4 + 2min Z1 recuperação)"
+                }
+            elif day == 4:  # Quinta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Recuperação Ativa",
+                    "Duração": "45min",
+                    "Zona FC": "Z1 (Recuperação)",
+                    "FC Alvo": f"{int(zones['Z1 (Recuperação)'][0])}-{int(zones['Z1 (Recuperação)'][1])} bpm",
+                    "Descrição": "Pedal leve em terreno plano"
+                }
+            elif day == 5:  # Sexta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Core e Superior",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"
+                }
+            elif day == 6:  # Sábado
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Longão",
+                    "Duração": "2h30min" if week < 3 else "3h" if week < 6 else "3h30min",
+                    "Zona FC": "Z2-Z3 (Aeróbico-Tempo)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z3 (Tempo)'][1])} bpm",
+                    "Descrição": "Pedal longo com variação de terreno, focando em manter FC"
+                }
             
-            output_path = os.path.join(download_path, f"planilha_consolidada_parte_{i+1}.xlsx")
-            parte.to_excel(output_path, index=False)
+            plan.append(workout)
+            current_date += timedelta(days=1)
         
-        progress_bar.progress(100, text="Processamento concluído!")
-        time.sleep(0.5)
-        
-        success_message = f"""
-        <div class="success-message">
-            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-            </svg>
-            <h3 style="margin-top: 10px; margin-bottom: 5px;">Processamento concluído com sucesso!</h3>
-            <p style="margin: 5px 0;">Total de linhas processadas: <strong>{total_linhas}</strong></p>
-            <p style="margin: 5px 0;">Arquivos gerados: <strong>{num_arquivos}</strong></p>
-            <p style="margin: 5px 0;">Salvo em: <strong>{download_path}</strong></p>
-        </div>
-        """
-        st.markdown(success_message, unsafe_allow_html=True)
-        
-        # Restaurar o botão original após a conclusão
-        with button_placeholder:
-            if st.button('🚀 INICIAR PROCESSAMENTO', key='importar_again', help="Clique para importar e consolidar as planilhas"):
-                st.session_state.processing = True
-        
-        return df_final, contas_sem_depara
-        
-    except Exception as e:
-        st.error(f"Ocorreu um erro: {str(e)}")
-        progress_bar.empty()
-        # Restaurar o botão original em caso de erro
-        with button_placeholder:
-            if st.button('🚀 INICIAR PROCESSAMENTO', key='importar_again', help="Clique para importar e consolidar as planilhas"):
-                st.session_state.processing = True
-        return None, None
+        current_date += timedelta(days=1)  # Domingo é dia de descanso
+    
+    return pd.DataFrame(plan)
 
 # Interface do aplicativo
-def main():
-    # Aplicar o CSS
-    st.markdown(custom_css, unsafe_allow_html=True)
-    
-    # Título do aplicativo
-    st.markdown('<h1 class="title">📊 Importador de Lançamentos DOMINIO</h1>', unsafe_allow_html=True)
-    
-    # Descrição
-    st.markdown("""
-    <div style="text-align: center; margin-bottom: 2.5rem; color: #455A64; font-size: 1.1rem; line-height: 1.6;">
-        Esta ferramenta consolida automaticamente planilhas de diferentes formatos<br>
-        em um único arquivo padronizado para análise.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Container principal com efeito de card
-    with st.container():
-        st.markdown("""
-        <div style="background: rgba(255, 255, 255, 0.7); border-radius: 15px; padding: 2rem; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">
-            <h3 style="color: #2E7D32; text-align: center; margin-bottom: 1.5rem;">Instruções</h3>
-            <ol style="color: #455A64; padding-left: 1.5rem;">
-                <li style="margin-bottom: 0.5rem;">Certifique-se que os arquivos estão nas pastas corretas (Documents/import e Documents/import2)</li>
-                <li style="margin-bottom: 0.5rem;">Clique no botão abaixo para iniciar o processamento</li>
-                <li style="margin-bottom: 0.5rem;">Aguarde até a conclusão do processo</li>
-                <li>Os arquivos consolidados serão salvos automaticamente na pasta Documents/download</li>
-            </ol>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Espaçamento
-    st.markdown("<div style='height: 2rem;'></div>", unsafe_allow_html=True)
-    
-    # Botão centralizado com efeitos especiais
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        button_placeholder = st.empty()
-        
-        if 'processing' not in st.session_state:
-            st.session_state.processing = False
-            st.session_state.contas_sem_depara = None
-        
-        if not st.session_state.processing:
-            if button_placeholder.button('🚀 INICIAR PROCESSAMENTO', key='importar', help="Clique para importar e consolidar as planilhas"):
-                st.session_state.processing = True
-                st.rerun()
-        else:
-            # Criar uma barra de progresso
-            progress_bar = st.progress(0, text="Preparando para processar...")
-            
-            # Chamar a função de processamento com a barra de progresso
-            df_final, contas_sem_depara = processar_planilhas(progress_bar, button_placeholder)
-            
-            # Armazenar contas sem depara na sessão
-            if contas_sem_depara is not None:
-                st.session_state.contas_sem_depara = contas_sem_depara
-            
-            # Remover a barra de progresso após um breve delay
-            time.sleep(1)
-            progress_bar.empty()
-            st.session_state.processing = False
-    
-    # Seção para extrair contas sem depara (sem mostrar a tabela)
-    if st.session_state.get('contas_sem_depara') is not None and not st.session_state.contas_sem_depara.empty:
-        st.markdown("---")
-        
-        num_contas_sem_depara = len(st.session_state.contas_sem_depara)
-        
-        # Mensagem informativa sobre contas sem depara
-        st.markdown(f"""
-        <div class="contas-sem-depara-info">
-            <strong>⚠️ Foram encontradas {num_contas_sem_depara} contas sem correspondência no depara.</strong><br>
-            Você pode baixar a lista completa clicando no botão abaixo.
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Botão para baixar contas sem depara
-        excel_file = criar_excel_em_memoria(st.session_state.contas_sem_depara)
-        st.download_button(
-            label="📥 EXTRAIR CONTAS SEM DEPARA",
-            data=excel_file,
-            file_name="contas_sem_depara.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key='download_contas_sem_depara',
-            help="Clique para baixar todas as contas que não foram encontradas no depara",
-            use_container_width=True
-        )
+st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
+st.markdown("---")
 
-if __name__ == "__main__":
-    main()
+# Sidebar com informações do usuário
+with st.sidebar:
+    st.markdown("""
+    <div class="user-profile">
+        <h2>Perfil do Atleta</h2>
+        <div class="profile-card">
+            <p><strong>Nome:</strong> {nome}</p>
+            <p><strong>Idade:</strong> {idade} anos</p>
+            <p><strong>Altura:</strong> {altura}m</p>
+            <p><strong>Peso:</strong> {peso}kg</p>
+            <p><strong>VO2 Máx:</strong> {v02max} bpm</p>
+            <p><strong>Objetivo:</strong> {objetivo}</p>
+            <p><strong>Nível:</strong> {nivel}</p>
+            <p><strong>Disponibilidade:</strong> {disponibilidade}</p>
+        </div>
+    </div>
+    """.format(**user_data), unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.markdown("### Zonas de Frequência Cardíaca")
+    for zone, (min_fc, max_fc) in zones.items():
+        st.markdown(f"**{zone}:** {int(min_fc)}-{int(max_fc)} bpm")
+    
+    st.markdown("---")
+    st.markdown("### Download do Plano")
+    if st.button("Exportar para Excel"):
+        today = datetime.now().date()
+        workout_plan = generate_workout_plan(today)
+        
+        # Criar um arquivo Excel em memória
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            workout_plan.to_excel(writer, sheet_name='Plano de Treino', index=False)
+            
+            # Adicionar a dieta
+            diet_sheet = pd.DataFrame.from_dict({(i,j): diet_plan[i][j] 
+                                               for i in diet_plan.keys() 
+                                               for j in diet_plan[i].keys()},
+                                               orient='index')
+            diet_sheet.to_excel(writer, sheet_name='Plano Alimentar')
+        
+        output.seek(0)
+        b64 = base64.b64encode(output.read()).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="Plano_Treino_Dieta.xlsx">Baixar Plano Completo</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
+# Abas principais
+tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
+
+with tab1:
+    st.header("Plano de Treino - 60 Dias")
+    today = datetime.now().date()
+    workout_plan = generate_workout_plan(today)
+    
+    # Seletor de data em formato de calendário
+    st.subheader("📆 Consultar Treino por Data")
+    
+    # Definir range de datas para o calendário
+    min_date = workout_plan["Data"].min()
+    max_date = workout_plan["Data"].max()
+    
+    # Widget de seleção de data
+    selected_date = st.date_input(
+        "Selecione a data para ver o treino:",
+        value=today,
+        min_value=min_date,
+        max_value=max_date,
+        format="DD/MM/YYYY"
+    )
+    
+    # Converter a data selecionada para o mesmo formato usado no DataFrame
+    selected_date_str = selected_date.strftime("%d/%m/%Y")
+    
+    # Filtrar o treino da data selecionada
+    selected_workout = workout_plan[workout_plan["Dia"] == selected_date_str]
+    
+    if not selected_workout.empty:
+        workout = selected_workout.iloc[0]
+        st.markdown(f"""
+        <div class="workout-card">
+            <h3>Treino do dia {workout['Dia']} ({workout['Dia da Semana']})</h3>
+            <p><strong>🔹 Tipo de Treino:</strong> {workout['Tipo de Treino']}</p>
+            <p><strong>⏱ Duração:</strong> {workout['Duração']}</p>
+            <p><strong>❤️ Zona FC:</strong> {workout['Zona FC']}</p>
+            <p><strong>🎯 FC Alvo:</strong> {workout['FC Alvo']}</p>
+            <p><strong>📝 Descrição:</strong> {workout['Descrição']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.warning("Nenhum treino encontrado para a data selecionada.")
+    
+    # Filtros
+    st.subheader("Filtrar Treinos")
+    col1, col2 = st.columns(2)
+    with col1:
+        filter_type = st.selectbox("Filtrar por Tipo de Treino", ["Todos"] + list(workout_plan["Tipo de Treino"].unique()))
+    with col2:
+        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + [f"Semana {i}" for i in range(1, 9)])
+    
+    # Aplicar filtros
+    filtered_plan = workout_plan.copy()
+    if filter_type != "Todos":
+        filtered_plan = filtered_plan[filtered_plan["Tipo de Treino"] == filter_type]
+    if filter_week != "Todas":
+        week_num = int(filter_week.split()[1])
+        start_idx = (week_num - 1) * 6
+        end_idx = start_idx + 6
+        filtered_plan = filtered_plan.iloc[start_idx:end_idx]
+    
+    # Mostrar tabela
+    st.dataframe(filtered_plan.drop(columns=["Data"]), hide_index=True, use_container_width=True)
+    
+    # Gráfico de distribuição de treinos
+    st.subheader("Distribuição de Treinos")
+    workout_dist = workout_plan["Tipo de Treino"].value_counts().reset_index()
+    workout_dist.columns = ["Tipo de Treino", "Quantidade"]
+    
+    fig = px.pie(workout_dist, values="Quantidade", names="Tipo de Treino", 
+                 color_discrete_sequence=px.colors.sequential.RdBu,
+                 hole=0.4)
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    st.header("Plano Alimentar - Opções Variadas")
+    
+    for meal, options in diet_plan.items():
+        with st.expander(f"🔸 {meal}"):
+            for opt, desc in options.items():
+                st.markdown(f"""
+                <div class="meal-option">
+                    <h4>{opt}</h4>
+                    <p>{desc}</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.subheader("Recomendações Nutricionais")
+    st.markdown("""
+    - Consuma proteína em todas as refeições (ovos, frango, carne, peixe)
+    - Hidrate-se bem (3-4L de água por dia)
+    - Prefira carboidratos complexos (arroz integral, batata, aveia)
+    - Gorduras saudáveis (castanhas, azeite, abacate)
+    - Coma legumes e verduras à vontade
+    """)
+
+# Rodapé
+st.markdown("---")
+st.markdown("""
+<div class="footer">
+    <p>PerformanceFit © 2023 - Plano personalizado para {nome}</p>
+    <p>Atualizado em: {date}</p>
+</div>
+""".format(nome=user_data["nome"], date=datetime.now().strftime("%d/%m/%Y")), unsafe_allow_html=True)
