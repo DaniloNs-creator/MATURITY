@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import base64
 from io import BytesIO
 
@@ -214,10 +214,11 @@ diet_plan = {
     }
 }
 
-# Plano de treino de 60 dias
-def generate_workout_plan(start_date):
+# Plano de treino de 60 dias começando em 11/08/2025
+def generate_workout_plan():
     plan = []
-    current_date = start_date
+    # Data fixa para começar o plano: 11/08/2025 (dia 11 de agosto de 2025)
+    current_date = date(2025, 8, 11)
     
     for week in range(1, 9):  # 8 semanas = ~60 dias
         for day in range(1, 7):  # 6 dias de treino por semana
@@ -325,8 +326,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Download do Plano")
     if st.button("Exportar para Excel"):
-        today = datetime.now().date()
-        workout_plan = generate_workout_plan(today)
+        workout_plan = generate_workout_plan()
         
         # Criar um arquivo Excel em memória
         output = BytesIO()
@@ -349,9 +349,8 @@ with st.sidebar:
 tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
 
 with tab1:
-    st.header("Plano de Treino - 60 Dias")
-    today = datetime.now().date()
-    workout_plan = generate_workout_plan(today)
+    st.header("Plano de Treino - 60 Dias (Início: 11/08/2025)")
+    workout_plan = generate_workout_plan()
     
     # Seletor de data em formato de calendário
     st.subheader("📆 Consultar Treino por Data")
@@ -363,7 +362,7 @@ with tab1:
     # Widget de seleção de data
     selected_date = st.date_input(
         "Selecione a data para ver o treino:",
-        value=today,
+        value=min_date,  # Mostra a primeira data do plano (11/08/2025) como padrão
         min_value=min_date,
         max_value=max_date,
         format="DD/MM/YYYY"
