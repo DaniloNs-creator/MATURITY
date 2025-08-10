@@ -629,7 +629,7 @@ with tab1:
         use_container_width=True,
         column_config={
             "Dia": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-            "Duração": st.column_config.ProgressColumn(
+            "Duraçã": st.column_config.ProgressColumn(
                 "Duração",
                 help="Duração do treino",
                 format="%f",
