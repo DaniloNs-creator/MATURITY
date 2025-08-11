@@ -221,7 +221,7 @@ def get_user_data():
         "idade": 28,
         "altura": 1.87,
         "peso": 108,
-        "v02max": 173,
+        "v02max": 181,
         "objetivo": "Performance Olímpica no Ciclismo",
         "nivel": "Avançado",
         "disponibilidade": "6 dias/semana",
@@ -790,7 +790,7 @@ with tab3:
         <div class="card">
             <h4 style="margin-top: 0; color: var(--primary);">VO2 Máx</h4>
             <div style="display: flex; align-items: baseline;">
-                <span style="font-size: 1.75rem; font-weight: 700;">173</span>
+                <span style="font-size: 1.75rem; font-weight: 700;">181</span>
                 <span style="margin-left: 0.5rem; color: var(--success); font-weight: 500; font-size: 0.9rem;">(+5% desde o início)</span>
             </div>
             <div style="width: 100%; background-color: #e9ecef; border-radius: 10px; margin: 0.75rem 0 0.5rem;">
@@ -853,3 +853,4 @@ st.markdown("""
     <p style="margin: 0.5rem 0 0; font-size: 0.8rem; opacity: 0.7;">© 2025 Todos os direitos reservados | Versão 2.0 Premium</p>
 </div>
 """, unsafe_allow_html=True)
+
