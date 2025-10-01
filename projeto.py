@@ -9,30 +9,24 @@ st.title("🔄 Conversor de Arquivo SEG 69 para Excel")
 # Cria o uploader de arquivo
 arquivo_seg69 = st.file_uploader(
     "Faça o upload do seu arquivo SEG 69",
-    type=None,  # Você pode especificar a extensão do SEG 69 aqui, se souber (ex: .seg69)
+    type=None,
     help="Carregue o arquivo no formato SEG 69 que deseja converter."
 )
 
-# Verifica se um arquivo foi carregado
 if arquivo_seg69 is not None:
     try:
         # Lê o conteúdo do arquivo como bytes
-        bytes_data = arquivo_seg69.getvalue()[citation:3][citation:7]
+        bytes_data = arquivo_seg69.getvalue()
         
-        # Aqui você deve implementar a lógica específica para processar o formato SEG 69.
-        # O exemplo abaixo lê o arquivo como um DataFrame CSV. Adapte conforme necessário.
-        # Por exemplo: 
-        # df = pd.read_csv(BytesIO(bytes_data), delimiter=';', encoding='latin-1')
-        
-        # LÓGICA DE CONVERSÃO DO SEG 69 (EXEMPLO GENÉRICO)
-        # Como o formato exato do SEG 69 não é comum, este é um placeholder.
-        # Você precisará ajustar esta parte com base na estrutura real do seu arquivo.
         st.info("Processando o arquivo SEG 69...")
         
         # Tenta decodificar os bytes para string e criar um DataFrame
         # Altere o encoding e o delimitador conforme a necessidade do seu arquivo
         stringio = BytesIO(bytes_data)
         df = pd.read_csv(stringio, delimiter=';', encoding='iso-8859-1')  # Ajuste crítico aqui
+        
+        # Armazena o DataFrame no session_state para acesso seguro em outros pontos do app
+        st.session_state['df_processado'] = df
         
         # Exibe uma prévia dos dados
         st.subheader("Prévia dos Dados Convertidos")
