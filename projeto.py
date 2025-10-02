@@ -1,306 +1,198 @@
 import streamlit as st
 import pandas as pd
-import io
-from datetime import datetime
+import pdfplumber
 import re
+import io
 
-# Configura a página
-st.set_page_config(page_title="Conversor 69 PG", page_icon="📄", layout="wide")
+# --- Funções de Extração (Ajustadas para o novo PDF) ---
 
-st.title("📄 Conversor de Arquivo 69 PG para Excel")
+def parse_linha_evento(linha):
+    """
+    Tenta extrair informações de uma linha de evento.
+    Esta função é complexa devido à variação no espaçamento e colunas.
+    """
+    # Padrão de data é um bom ponto de referência
+    match_data = re.search(r'(\d{2}/\d{2}/\d{4})', linha)
+    if not match_data:
+        return None
+
+    data_evento = match_data.group(1)
+    partes = linha.split(data_evento)
+    
+    parte_esquerda = partes[0].strip()
+    parte_direita = partes[1].strip()
+
+    # Na parte direita, os valores numéricos estão no final
+    valores = re.findall(r'[\d.,]+', parte_direita)
+    valor_total = "0,00"
+    if valores:
+        # O último valor numérico geralmente é o Valor Total da coparticipação
+        valor_total = valores[-1]
+
+    # Na parte esquerda, temos a descrição e o executor
+    # O executor geralmente é um nome em maiúsculas precedido por um código de guia (número longo)
+    match_guia_executor = re.search(r'\d{7,}\s+(.*)', parte_esquerda)
+    if match_guia_executor:
+        executor = match_guia_executor.group(1).strip()
+        descricao = parte_esquerda.split(match_guia_executor.group(0))[0].strip()
+    else:
+        # Se não encontrar um guia claro, a lógica fica mais simples
+        executor = "N/A"
+        descricao = parte_esquerda
+        # Tenta pegar o último conjunto de palavras em maiúsculas como o executor
+        palavras_maiusculas = re.findall(r'([A-Z][A-Z\s]+[A-Z])', parte_esquerda)
+        if palavras_maiusculas:
+            executor = palavras_maiusculas[-1].strip()
+            # Remove o nome do executor da descrição para limpá-la
+            descricao = descricao.replace(executor, '').strip()
+
+
+    return {
+        "Descricao": descricao,
+        "Executor": executor,
+        "Data": data_evento,
+        "Valor_Total_Coparticipacao": valor_total
+    }
+
+
+def extrair_dados_pdf(arquivo_pdf):
+    """
+    Função principal para extrair e processar os dados de todas as páginas do PDF.
+    """
+    registros = []
+    
+    contexto = {
+        "familia": None,
+        "responsavel": None,
+        "matricula_funcional": None,
+        "beneficiario_atual": None,
+        "modulo_atual": "Não Identificado" # Valor padrão
+    }
+
+    with pdfplumber.open(arquivo_pdf) as pdf:
+        for pagina in pdf.pages:
+            texto = pagina.extract_text(x_tolerance=2, y_tolerance=2)
+            if not texto:
+                continue
+
+            linhas = texto.split('\n')
+            
+            for linha in linhas:
+                # 1. Identifica a Família
+                match_familia = re.search(r"^\s*Familia:\s*(\d+)", linha)
+                if match_familia:
+                    contexto["familia"] = match_familia.group(1)
+                    # Reseta o responsável ao encontrar uma nova família
+                    contexto["responsavel"] = None
+                    contexto["matricula_funcional"] = None
+                    continue
+
+                # 2. Identifica o Responsável e a Matrícula
+                match_responsavel = re.search(r"^\s*Responsável:\s*(.*?)(?:\s*Matricula Funcional:\s*(.*))?$", linha)
+                if match_responsavel:
+                    contexto["responsavel"] = match_responsavel.group(1).strip()
+                    contexto["matricula_funcional"] = match_responsavel.group(2).strip() if match_responsavel.group(2) else "N/A"
+                    continue
+
+                # 3. Identifica um novo Beneficiário (pode ser o titular ou dependente)
+                match_beneficiario = re.search(r"^\s*BENEFICIARIO:\s*\S+\s*Nome:\s*(.*)", linha)
+                if match_beneficiario:
+                    contexto["beneficiario_atual"] = match_beneficiario.group(1).strip()
+                    continue
+                # Às vezes o nome do beneficiário aparece em outra linha
+                if "BENEFICIÁRIO:" in linha and "Nome:" not in linha:
+                    # O nome pode estar na próxima linha
+                    # Essa lógica pode ser complexa, então vamos focar no padrão principal.
+                    pass
+
+
+                # 4. Identifica o Módulo do plano
+                if "NR PJ NAC AMB HOSP ENF OBST COPARTICIPACAO 25%" in linha:
+                    contexto["modulo_atual"] = "NR PJ NAC AMB HOSP ENF OBST COPARTICIPACAO 25%"
+                    continue
+
+                # 5. Tenta identificar e extrair dados de uma linha de evento
+                # A condição é que já tenhamos um beneficiário identificado
+                if contexto["beneficiario_atual"] and re.search(r'\d{2}/\d{2}/\d{4}', linha):
+                    dados_evento = parse_linha_evento(linha)
+                    if dados_evento:
+                        registro_completo = {
+                            "Familia": contexto["familia"],
+                            "Responsavel": contexto["responsavel"],
+                            "Matricula_Funcional": contexto["matricula_funcional"],
+                            "Beneficiario_Utilizacao": contexto["beneficiario_atual"],
+                            "Modulo_Plano": contexto["modulo_atual"],
+                            "Descricao_Evento": dados_evento["Descricao"],
+                            "Executor": dados_evento["Executor"],
+                            "Data_Evento": dados_evento["Data"],
+                            "Valor_Coparticipacao": dados_evento["Valor_Total_Coparticipacao"]
+                        }
+                        registros.append(registro_completo)
+
+    if not registros:
+        return pd.DataFrame() # Retorna DF vazio se nada for encontrado
+
+    df = pd.DataFrame(registros)
+    return df
+
+
+def to_excel(df):
+    """
+    Converte um DataFrame para um arquivo Excel em memória.
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Extrato_Detalhado')
+        # Auto-ajuste da largura das colunas para melhor visualização
+        for column in df:
+            column_width = max(df[column].astype(str).map(len).max(), len(column)) + 2
+            col_idx = df.columns.get_loc(column)
+            writer.sheets['Extrato_Detalhado'].set_column(col_idx, col_idx, column_width)
+    processed_data = output.getvalue()
+    return processed_data
+
+# --- Interface do Streamlit (UI) ---
+
+st.set_page_config(page_title="Conversor de Faturamento Unimed", layout="wide")
+
+st.title("📄 Conversor de Demonstrativo de Faturamento Unimed")
 st.markdown("""
-Este aplicativo converte arquivos 69 PG para Excel, extraindo:
-- **Nome** do titular
-- **Módulo** (informações de coparticipação)
-- **Família** e **Dependentes**
+Esta aplicação foi **ajustada para ler o layout específico do arquivo `Unimed - Demonstrativo de Faturamento`**. 
+Ela extrai os dados de utilização de cada beneficiário e os organiza em uma tabela.
+
+**Instruções:**
+1.  Faça o upload do seu arquivo PDF.
+2.  Aguarde o processamento.
+3.  Visualize os dados extraídos na tela.
+4.  Clique no botão para baixar o relatório completo em formato Excel.
 """)
 
-# Widget para upload de arquivo
 uploaded_file = st.file_uploader(
-    "Faça o upload do arquivo 69 PG", 
-    type=['txt', 'pg', '69'],
-    help="Selecione o arquivo 69 PG que deseja converter"
+    "Escolha o seu arquivo PDF de faturamento", 
+    type="pdf"
 )
 
-def processar_arquivo_69pg(conteudo):
-    """
-    Processa o conteúdo do arquivo 69 PG e extrai as informações estruturadas
-    """
-    linhas = conteudo.splitlines()
-    
-    familias = []
-    current_family = {}
-    current_dependentes = []
-    in_familia_section = False
-    in_dependentes_section = False
-    
-    for i, linha in enumerate(linhas):
-        linha = linha.strip()
-        
-        if not linha:
-            continue
-            
-        # Detecta seção "Nome:"
-        if linha.startswith("Nome:") or linha.startswith("Nome :"):
-            if current_family and current_family.get('Nome'):
-                # Salva a família anterior antes de iniciar nova
-                current_family["Dependentes"] = current_dependentes.copy()
-                familias.append(current_family.copy())
-                current_dependentes = []
-            
-            # Extrai o nome após "Nome:"
-            nome = linha.split(":", 1)[1].strip() if ":" in linha else linha.replace("Nome", "").strip()
-            current_family = {
-                "Nome": nome,
-                "Modulo": "",
-                "Familia": "",
-                "Dependentes": []
-            }
-            in_familia_section = False
-            in_dependentes_section = False
-        
-        # Detecta seção "I módulo" ou informações de coparticipação
-        elif "módulo" in linha.lower() or "modulo" in linha.lower() or "coparticipação" in linha.lower():
-            if current_family:
-                current_family["Modulo"] = linha
-                # Tenta pegar linhas subsequentes do módulo
-                mod_lines = [linha]
-                for j in range(i+1, min(i+5, len(linhas))):
-                    next_line = linhas[j].strip()
-                    if next_line and not any(x in next_line.lower() for x in ['nome:', 'família', 'familia', 'dependente']):
-                        mod_lines.append(next_line)
-                    else:
-                        break
-                current_family["Modulo"] = " | ".join(mod_lines)
-        
-        # Detecta início da seção "Familia"
-        elif "familia" in linha.lower() or "família" in linha.lower():
-            if current_family:
-                current_family["Familia"] = linha
-                in_familia_section = True
-                in_dependentes_section = True
-        
-        # Identifica dependentes (apenas quando estiver na seção da família)
-        elif in_dependentes_section and linha:
-            # Verifica se é um dependente (não é outro cabeçalho)
-            is_dependente = (
-                not linha.startswith("Nome:") and 
-                not linha.startswith("I módulo") and 
-                "módulo" not in linha.lower() and
-                "familia" not in linha.lower() and
-                "família" not in linha.lower() and
-                len(linha) > 3  # Linhas muito curtas provavelmente não são dependentes
-            )
-            
-            if is_dependente:
-                current_dependentes.append(linha)
-        
-        # Se encontrar um novo nome sem fechar a família anterior
-        elif linha.startswith("Nome:") and current_family and current_family.get('Nome'):
-            current_family["Dependentes"] = current_dependentes.copy()
-            familias.append(current_family.copy())
-            current_dependentes = []
-            
-            nome = linha.split(":", 1)[1].strip() if ":" in linha else linha.replace("Nome", "").strip()
-            current_family = {
-                "Nome": nome,
-                "Modulo": "",
-                "Familia": "",
-                "Dependentes": []
-            }
-            in_familia_section = False
-            in_dependentes_section = False
-    
-    # Adiciona a última família processada
-    if current_family and current_family.get('Nome'):
-        current_family["Dependentes"] = current_dependentes
-        familias.append(current_family)
-    
-    return familias
-
-def criar_dataframe_exportacao(familias):
-    """
-    Cria DataFrame para exportação a partir da lista de famílias
-    """
-    export_data = []
-    
-    for familia in familias:
-        nome = familia.get("Nome", "")
-        modulo = familia.get("Modulo", "")
-        familia_info = familia.get("Familia", "")
-        dependentes = familia.get("Dependentes", [])
-        
-        # Se não houver dependentes, inclui pelo menos a família
-        if not dependentes:
-            export_data.append({
-                "Nome_Titular": nome,
-                "Modulo_Coparticipacao": modulo,
-                "Info_Familia": familia_info,
-                "Dependente": "",
-                "Tipo": "Titular"
-            })
-        else:
-            # Inclui o titular
-            export_data.append({
-                "Nome_Titular": nome,
-                "Modulo_Coparticipacao": modulo,
-                "Info_Familia": familia_info,
-                "Dependente": nome,
-                "Tipo": "Titular"
-            })
-            
-            # Inclui os dependentes
-            for dependente in dependentes:
-                export_data.append({
-                    "Nome_Titular": nome,
-                    "Modulo_Coparticipacao": modulo,
-                    "Info_Familia": familia_info,
-                    "Dependente": dependente,
-                    "Tipo": "Dependente"
-                })
-    
-    return pd.DataFrame(export_data)
-
-# Interface principal
 if uploaded_file is not None:
-    try:
-        # Lê o conteúdo do arquivo
-        bytes_data = uploaded_file.getvalue()
-        
-        # Tenta decodificar como texto
+    with st.spinner('Analisando o PDF e extraindo os dados... Isso pode demorar um pouco.'):
         try:
-            string_data = bytes_data.decode("utf-8")
-        except UnicodeDecodeError:
-            try:
-                string_data = bytes_data.decode("latin-1")
-            except UnicodeDecodeError:
-                string_data = bytes_data.decode("iso-8859-1")
-        
-        # Mostra preview do arquivo original
-        with st.expander("📄 Visualizar arquivo original"):
-            st.text_area("Conteúdo do arquivo", string_data, height=300, key="original_file")
-        
-        # Processa o arquivo
-        with st.spinner("Processando arquivo..."):
-            familias = processar_arquivo_69pg(string_data)
-        
-        if familias:
-            st.success(f"✅ Processamento concluído! {len(familias)} famílias identificadas.")
+            df_extraido = extrair_dados_pdf(uploaded_file)
             
-            # Cria DataFrame para exportação
-            df_export = criar_dataframe_exportacao(familias)
-            
-            # Exibe estatísticas
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                total_familias = len(familias)
-                st.metric("Famílias Identificadas", total_familias)
-            with col2:
-                total_dependentes = sum(len(fam.get("Dependentes", [])) for fam in familias)
-                st.metric("Total de Dependentes", total_dependentes)
-            with col3:
-                st.metric("Total de Registros", len(df_export))
-            with col4:
-                st.metric("Arquivo", uploaded_file.name)
-            
-            # Exibe preview dos dados processados
-            st.subheader("📊 Dados Processados")
-            st.dataframe(df_export, use_container_width=True)
-            
-            # Mostra detalhes das famílias
-            with st.expander("🔍 Detalhamento por Família"):
-                for i, familia in enumerate(familias, 1):
-                    st.write(f"**Família {i}: {familia['Nome']}**")
-                    if familia.get('Modulo'):
-                        st.write(f"**Módulo:** {familia['Modulo']}")
-                    if familia.get('Familia'):
-                        st.write(f"**Família:** {familia['Familia']}")
-                    if familia.get('Dependentes'):
-                        st.write("**Dependentes:**")
-                        for dep in familia['Dependentes']:
-                            st.write(f"  - {dep}")
-                    st.write("---")
-            
-            # Prepara o arquivo Excel para download
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_export.to_excel(writer, sheet_name='Dados_69PG', index=False)
+            if not df_extraido.empty:
+                st.success(f"🎉 Processamento concluído! Foram encontrados {len(df_extraido)} registros de eventos.")
                 
-                # Formatação da planilha
-                workbook = writer.book
-                worksheet = writer.sheets['Dados_69PG']
+                st.dataframe(df_extraido)
                 
-                # Formata cabeçalho
-                header_format = workbook.add_format({
-                    'bold': True,
-                    'text_wrap': True,
-                    'valign': 'top',
-                    'fg_color': '#D7E4BC',
-                    'border': 1
-                })
+                excel_file = to_excel(df_extraido)
                 
-                for col_num, value in enumerate(df_export.columns.values):
-                    worksheet.write(0, col_num, value, header_format)
-                    worksheet.set_column(col_num, col_num, 25)
-            
-            processed_data = output.getvalue()
-            
-            # Botão de download
-            st.download_button(
-                label="📥 Baixar Arquivo Excel",
-                data=processed_data,
-                file_name=f"69PG_convertido_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_excel"
-            )
-            
-        else:
-            st.warning("⚠️ Não foi possível identificar famílias no arquivo.")
-            st.info("""
-            **Sugestões:**
-            - Verifique se o arquivo está no formato correto 69 PG
-            - Confirme se existem seções 'Nome:', 'I módulo' e 'Familia'
-            - O arquivo pode ter um formato diferente do esperado
-            """)
-            
-    except Exception as e:
-        st.error(f"❌ Erro ao processar o arquivo: {str(e)}")
-        st.info("Tente verificar o formato do arquivo ou entre em contato com o suporte.")
+                st.download_button(
+                    label="📥 Baixar Relatório em Excel",
+                    data=excel_file,
+                    file_name=f"faturamento_unimed_{uploaded_file.name}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.warning("Não foram encontrados registros de eventos no formato esperado. Verifique se o arquivo PDF é o correto ou se o layout não foi alterado.")
 
-else:
-    st.info("👆 Faça o upload do arquivo 69 PG para iniciar a conversão.")
-
-# Adiciona seção de instruções e informações
-with st.expander("ℹ️ Instruções de Uso e Informações"):
-    st.markdown("""
-    ### 📋 Como Usar:
-    1. **Upload**: Clique em "Browse files" ou arraste seu arquivo 69 PG
-    2. **Processamento Automático**: O app analisará e estruturará os dados
-    3. **Verificação**: Confira os dados processados na visualização
-    4. **Download**: Baixe o arquivo Excel estruturado
-
-    ### 🏷️ Estrutura Esperada no Arquivo 69 PG:
-    ```
-    Nome: JOÃO DA SILVA
-    I módulo: Coparticipação - Informações do plano...
-    Familia: Dados da família...
-    Dependente 1: MARIA SILVA
-    Dependente 2: PEDRO SILVA
-    ```
-
-    ### 📊 Estrutura do Excel Gerado:
-    - **Nome_Titular**: Nome do titular do plano
-    - **Modulo_Coparticipacao**: Informações do módulo e coparticipação
-    - **Info_Familia**: Dados da família
-    - **Dependente**: Nome do dependente (ou titular se for ele mesmo)
-    - **Tipo**: "Titular" ou "Dependente"
-
-    ### 🔧 Suporte:
-    Se o processamento não funcionar corretamente:
-    - Verifique o formato exato do seu arquivo
-    - Entre em contato para ajustes específicos
-    """)
-
-# Rodapé
-st.markdown("---")
-st.markdown("*Desenvolvido para conversão de arquivos 69 PG*")
+        except Exception as e:
+            st.error(f"Ocorreu um erro inesperado durante o processamento: {e}")
+            st.error("Este erro pode ocorrer se a estrutura do PDF for muito diferente da amostra fornecida.")
