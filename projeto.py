@@ -16,10 +16,10 @@ def extract_data_from_pdf(pdf_file):
         for page in pdf.pages:
             full_text += page.extract_text()
     
-    # Divide o texto em blocos, usando "Família: " como um marcador de início de grupo.
+    # Usa um regex para encontrar blocos de texto que começam com "Família: "
     family_blocks = re.split(r'(Família: \d+)', full_text)
     
-    # O primeiro item do split não é um bloco de família, então o ignoramos.
+    # O primeiro item do split é geralmente um cabeçalho, então o ignoramos.
     family_blocks = family_blocks[1:]
     
     for i in range(0, len(family_blocks), 2):
@@ -29,15 +29,15 @@ def extract_data_from_pdf(pdf_file):
         family_id_match = re.search(r'Família: (\d+)', family_header)
         family_id = family_id_match.group(1).strip() if family_id_match else None
         
-        # Encontra o nome do responsável.
+        # Encontra o nome do responsável
         responsible_match = re.search(r'Responsável: (.+)', family_content)
         responsible_name = responsible_match.group(1).strip() if responsible_match else None
         
-        # Encontra todos os nomes dos membros (dependentes) no bloco.
-        # Usa um lookbehind negativo para não capturar "Responsável:".
+        # Encontra todos os nomes de beneficiários e dependentes. 
+        # Usa um lookbehind negativo para não capturar "Responsável:"
         beneficiary_names = re.findall(r'(?<!Responsável: )Nome: (.+)', family_content)
         
-        # Adiciona o responsável aos dados.
+        # Adiciona o responsável aos dados
         if responsible_name:
             all_data.append({
                 'Família': family_id,
@@ -47,7 +47,7 @@ def extract_data_from_pdf(pdf_file):
                 'Coparticipação': '25%' 
             })
         
-        # Adiciona os dependentes aos dados.
+        # Adiciona os dependentes aos dados
         for name in beneficiary_names:
             all_data.append({
                 'Família': family_id,
@@ -89,8 +89,9 @@ if uploaded_file is not None:
             )
         else:
             st.warning("Não foi possível extrair os dados. Verifique a formatação do arquivo.")
-            st.info("Para este documento em específico, o script busca por 'Família: [número]', 'Responsável: [Nome]' e 'Nome: [Nome]'. Certifique-se de que esses padrões estejam presentes no arquivo.")
+            st.info("O script busca por 'Família: [número]', 'Responsável: [Nome]' e 'Nome: [Nome]'. Certifique-se de que esses padrões estejam presentes no arquivo.")
 
     except Exception as e:
         st.error(f"Ocorreu um erro ao processar o arquivo: {e}")
+        st.info("Verifique se o arquivo está no formato esperado e tente novamente.")
 
