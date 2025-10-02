@@ -6,7 +6,8 @@ import re
 
 def extract_and_process_pdf(pdf_file):
     """
-    Extrai dados de um PDF da Unimed e os organiza em um único DataFrame.
+    Extrai dados de um PDF da Unimed e os organiza em um único DataFrame
+    unificando todas as informações em uma única tabela.
     """
     all_data = []
     
@@ -16,21 +17,17 @@ def extract_and_process_pdf(pdf_file):
         
         # Extração de informações do cabeçalho
         competence_match = re.search(r"Competência: (.+)", first_page_text)
-        competencia = competence_match.group(1).strip() if competence_match else ""
+        competencia = competence_match.group(1).strip() if competence_match else "N/A"
         
         cnpj_match = re.search(r"CNPJ: (.+)", first_page_text)
-        cnpj = cnpj_match.group(1).strip() if cnpj_match else ""
+        cnpj = cnpj_match.group(1).strip() if cnpj_match else "N/A"
         
-        # Extração da tabela de faturas
-        faturas_table = next((t for t in first_page.extract_tables() if any("Fatura" in cell for cell in t[0])), None)
-        if faturas_table:
-            faturas_headers = [h.replace("\n", " ") for h in faturas_table[0]]
-            faturas_df = pd.DataFrame(faturas_table[1:], columns=faturas_headers)
-            fatura = faturas_df.iloc[0]["Fatura\n"]
-            valor_bruto_fatura = faturas_df.iloc[0]["Valor Bruto\n"]
-        else:
-            fatura, valor_bruto_fatura = "", ""
-            
+        fatura_match = re.search(r"Fatura\n+(\d+)\n", first_page_text)
+        fatura = fatura_match.group(1).strip() if fatura_match else "N/A"
+
+        valor_total_fatura_match = re.search(r"Total de Faturas:\n(.+?)\n", first_page_text)
+        valor_total_fatura = valor_total_fatura_match.group(1).strip() if valor_total_fatura_match else "N/A"
+
         # Extração do resumo de faturamento
         resumo_match = re.search(r"RESUMO DO FATURAMENTO\n\n(.+?)(?=\nFamília:|\nTotal de Faturas:)", first_page_text, re.DOTALL)
         resumo_data = {}
@@ -51,20 +48,23 @@ def extract_and_process_pdf(pdf_file):
             if family_match and responsible_match:
                 current_family_data = {
                     "Família": family_match.group(1),
-                    "Responsável": responsible_match.group(1).strip()
+                    "Responsavel": responsible_match.group(1).strip()
                 }
-
+            
             for table in page.extract_tables():
-                if table and "Descrição" in table[0]:
-                    headers = [h.replace("\n", " ").replace(".", "").strip() for h in table[0]]
+                # A tabela de eventos tem 'Descrição' como cabeçalho
+                if table and any("Descrição" in cell for cell in table[0]):
+                    headers = [h.replace("\n", " ").strip() for h in table[0]]
                     df = pd.DataFrame(table[1:], columns=headers)
+                    
                     if current_family_data:
                         for idx, row in df.iterrows():
+                            # Cria um dicionário para cada linha de evento, combinando todos os dados
                             record = {
+                                "Fatura": fatura,
                                 "Competencia": competencia,
                                 "CNPJ": cnpj,
-                                "Fatura": fatura,
-                                "Valor Bruto Fatura": valor_bruto_fatura,
+                                "Valor Total Fatura": valor_total_fatura,
                                 **resumo_data,
                                 "Família": current_family_data.get("Família"),
                                 "Responsavel": current_family_data.get("Responsavel"),
@@ -75,13 +75,14 @@ def extract_and_process_pdf(pdf_file):
                                 "Guia": row.get("Guia"),
                                 "Executor": row.get("Executor"),
                                 "Data": row.get("Data"),
-                                "Qtd": row.get("Qtd VE"),
-                                "Valor Total": row.get("Valor Total"),
+                                "Qtd": row.get("Qtd. VE"),
+                                "Valor Total Evento": row.get("Valor Total"),
                                 "INSS Base": row.get("INSS Base"),
                             }
                             all_data.append(record)
                             
     if all_data:
+        # Cria o DataFrame final a partir da lista de dicionários
         return pd.DataFrame(all_data)
     return None
 
@@ -104,6 +105,7 @@ if uploaded_file:
             st.success("Arquivo processado com sucesso!")
             st.dataframe(df_completo)
             
+            # Prepara o DataFrame para download em um único arquivo Excel
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 df_completo.to_excel(writer, index=False, sheet_name='Demonstrativo Completo')
@@ -116,4 +118,4 @@ if uploaded_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Não foi possível extrair dados do arquivo PDF. Por favor, verifique se o formato corresponde ao esperado.")
+            st.warning("Não foi possível extrair dados do arquivo PDF. Verifique se o formato corresponde ao esperado.")
