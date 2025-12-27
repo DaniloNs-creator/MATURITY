@@ -14,3 +14,6 @@ python-dateutil==2.8.2
 chardet==5.2.0
 tabula-py==2.8.0
 pdfplumber==0.11.0
+pdfplumber>=0.10.3
+PyMuPDF>=1.23.0
+lxml>=4.9.3
