@@ -1,250 +1,247 @@
 import streamlit as st
 import pandas as pd
+import pdfplumber
+import re
 import xml.etree.ElementTree as ET
+from xml.dom import minidom
 import time
 import io
-import re
 import chardet
 import traceback
 from datetime import datetime
 from io import BytesIO
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
-# --- CONFIGURAÇÃO E ESTILO ---
-st.set_page_config(page_title="Häfele | Data Processor", page_icon="📦", layout="wide")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(
+    page_title="Häfele | Data Hub Pro",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-def apply_custom_ui():
+# --- CSS PROFISSIONAL UNIFICADO ---
+def apply_ui_style():
     st.markdown("""
     <style>
-        .main { background-color: #f8fafc; }
-        .stApp { font-family: 'Inter', sans-serif; }
-        .header-container {
+        /* Fundo e Fonte Principal */
+        .stApp { background-color: #f8fafc; color: #1e293b; font-family: 'Inter', sans-serif; }
+        
+        /* Cabeçalho Häfele Style */
+        .header-box {
             background: #ffffff;
             padding: 2rem;
-            border-radius: 15px;
-            border-left: 8px solid #0054a6;
+            border-radius: 12px;
+            border-left: 10px solid #0054a6;
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
             margin-bottom: 2rem;
+            text-align: left;
         }
-        .hafele-logo { max-width: 200px; margin-bottom: 1rem; }
-        .stat-card {
+        .hafele-logo { max-width: 180px; margin-bottom: 1rem; }
+        
+        /* Containers de Conteúdo */
+        .content-card {
             background: white;
-            padding: 1.5rem;
+            padding: 2rem;
             border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            text-align: center;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 1rem;
         }
+
+        /* Botões Enterprise */
+        .stButton > button {
+            background-color: #2563eb !important;
+            color: white !important;
+            border-radius: 6px !important;
+            padding: 0.6rem 2rem !important;
+            font-weight: 500 !important;
+            border: none !important;
+            transition: 0.3s;
+        }
+        .stButton > button:hover { background-color: #1d4ed8 !important; transform: translateY(-1px); }
+
+        /* Estilização de métricas */
+        [data-testid="stMetricValue"] { font-size: 1.8rem !important; color: #0054a6; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ENGINE DE PROCESSAMENTO XML (ALTA PERFORMANCE) ---
-class HighScaleCTeProcessor:
-    """Processador otimizado para lidar com volumes massivos de XML (até 1M)"""
-    
-    NAMESPACES = {'cte': 'http://www.portalfiscal.inf.br/cte'}
-    
-    def __init__(self):
-        if 'db_cte' not in st.session_state:
-            st.session_state.db_cte = pd.DataFrame()
+# --- CLASSES E LOGICA DE PROCESSAMENTO ---
 
-    def fast_extract(self, element, path):
-        """Extração rápida com fallback de namespace"""
-        try:
-            # Tenta com namespace
-            found = element.find(f'.//{{{self.NAMESPACES["cte"]}}}{path}')
-            if found is None:
-                # Tenta sem namespace
-                found = element.find(f'.//{path}')
-            return found.text if found is not None else ""
-        except:
-            return ""
+class DataEngine:
+    """Motor de processamento central para TXT, CTe e DUIMP"""
 
-    def get_weight_data(self, root):
-        """Busca inteligente de peso em múltiplos nós"""
-        tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
-        
-        # Procura em infQ
-        for uri in ["", f"{{{self.NAMESPACES['cte']}}}"]:
-            for infQ in root.findall(f'.//{uri}infQ'):
-                tpMed = infQ.find(f'{uri}tpMed')
-                qCarga = infQ.find(f'{uri}qCarga')
-                
-                if tpMed is not None and qCarga is not None:
-                    med_text = tpMed.text.upper() if tpMed.text else ""
-                    for t in tipos_peso:
-                        if t in med_text:
-                            return float(qCarga.text or 0), med_text
-        return 0.0, "N/A"
-
-    def process_xml_batch(self, files):
-        """Processamento otimizado em lote"""
-        data_list = []
-        batch_size = 500 # Processa de 500 em 500 para atualizar UI
-        
-        total_files = len(files)
-        progress_bar = st.progress(0)
-        status = st.empty()
-
-        for idx, file in enumerate(files):
-            try:
-                content = file.read()
-                root = ET.fromstring(content)
-                
-                # Dados Básicos
-                nCT = self.fast_extract(root, 'nCT')
-                dhEmi = self.fast_extract(root, 'dhEmi')
-                vTPrest = self.fast_extract(root, 'vTPrest')
-                
-                # Localidades
-                uf_ini = self.fast_extract(root, 'UFIni')
-                uf_fim = self.fast_extract(root, 'UFFim')
-                
-                # Envolvidos
-                emit = self.fast_extract(root, 'emit/xNome')
-                dest = self.fast_extract(root, 'dest/xNome')
-                
-                # Peso e Chave
-                peso, tipo_p = self.get_weight_data(root)
-                chave = self.fast_extract(root, 'infNFe/chave')
-                n_nfe = chave[25:34] if len(chave) == 44 else ""
-
-                data_list.append({
-                    "nCT": nCT,
-                    "Emissao": dhEmi[:10] if dhEmi else "",
-                    "Emitente": emit[:30],
-                    "Destinatario": dest[:30],
-                    "UF_Origem": uf_ini,
-                    "UF_Destino": uf_fim,
-                    "Peso_KG": peso,
-                    "Tipo_Peso": tipo_p,
-                    "Valor_Prestacao": float(vTPrest or 0),
-                    "NF_Chave": chave,
-                    "NF_Numero": n_nfe,
-                    "Arquivo": file.name
-                })
-
-                if (idx + 1) % batch_size == 0 or (idx + 1) == total_files:
-                    progress = (idx + 1) / total_files
-                    progress_bar.progress(progress)
-                    status.text(f"🚀 Processado: {idx + 1} de {total_files} arquivos...")
-
-            except Exception as e:
-                continue # Pula arquivos corrompidos para não parar o lote de 1M
-
-        new_df = pd.DataFrame(data_list)
-        st.session_state.db_cte = pd.concat([st.session_state.db_cte, new_df], ignore_index=True)
-        return len(new_df)
-
-# --- ENGINE DE TEXTO (OTIMIZADO) ---
-class TextProcessor:
+    # --- MÉTODO 1: TXT CLEANER ---
     @staticmethod
-    def clean_txt(file_content):
-        substituicoes = {
+    def clean_txt(content, patterns_to_remove):
+        substitutions = {
             "IMPOSTO IMPORTACAO": "IMP IMPORT",
             "TAXA SICOMEX": "TX SISCOMEX",
             "FRETE INTERNACIONAL": "FRET INTER",
             "SEGURO INTERNACIONAL": "SEG INTERN"
         }
-        padroes_remover = ["-------", "SPED EFD-ICMS/IPI"]
+        enc = chardet.detect(content[:10000])['encoding'] or 'latin-1'
+        text = content.decode(enc)
         
-        # Detecção de encoding
-        enc = chardet.detect(file_content[:10000])['encoding'] or 'latin-1'
-        texto = file_content.decode(enc)
-        
-        linhas_finais = []
-        for linha in texto.splitlines():
-            if not any(p in linha for p in padroes_remover):
-                temp = linha
-                for k, v in substituicoes.items():
+        lines = text.splitlines()
+        processed = []
+        for line in lines:
+            if not any(p in line for p in patterns_to_remove):
+                temp = line
+                for k, v in substitutions.items():
                     temp = temp.replace(k, v)
-                linhas_finais.append(temp)
-        
-        return "\n".join(linhas_finais)
+                processed.append(temp)
+        return "\n".join(processed), len(lines)
 
-# --- INTERFACE PRINCIPAL ---
+    # --- MÉTODO 2: DUIMP CONVERTER (LAYOUT HAFELE) ---
+    @staticmethod
+    def parse_duimp_pdf(pdf_file):
+        text = ""
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+        
+        data = {"header": {}, "itens": []}
+        data["header"]["processo"] = re.search(r"PROCESSO\s*#?(\d+)", text, re.I).group(1) if re.search(r"PROCESSO\s*#?(\d+)", text, re.I) else "N/A"
+        data["header"]["duimp"] = re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", text, re.I).group(1) if re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", text, re.I) else "N/A"
+        
+        parts = re.split(r"ITENS DA DUIMP\s*[-–]?\s*(\d+)", text)
+        if len(parts) > 1:
+            for i in range(1, len(parts), 2):
+                num, block = parts[i], parts[i+1]
+                # Limpeza PartNumber
+                raw_pn = re.search(r"PARTNUMBER\)\s*(.*?)\s*(?:PAIS|FABRICANTE|CONDICAO)", block, re.S).group(1) if re.search(r"PARTNUMBER\)\s*(.*?)\s*(?:PAIS|FABRICANTE|CONDICAO)", block, re.S) else ""
+                pn = re.sub(r'(C[ÓO]DIGO|INTERNO|PARTNUMBER|\(|\))', '', raw_pn, flags=re.I).strip().lstrip("- ").strip()
+                
+                raw_desc = re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+C[ÓO]DIGO", block, re.S).group(1) if re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+C[ÓO]DIGO", block, re.S) else ""
+                
+                data["itens"].append({
+                    "seq": num,
+                    "descricao": f"{pn} - {re.sub(r'\s+', ' ', raw_desc).strip()}" if pn else raw_desc,
+                    "ncm": re.search(r"NCM\s*[:\n]*\s*([\d\.]+)", block).group(1).replace(".", "") if re.search(r"NCM\s*[:\n]*\s*([\d\.]+)", block) else "00000000",
+                    "peso": re.sub(r'[^\d,]', '', re.search(r"Peso Líquido \(KG\)\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Peso Líquido \(KG\)\s*[:\n]*\s*([\d\.,]+)", block) else "0").replace(',', ''),
+                    "qtd": re.sub(r'[^\d,]', '', re.search(r"Qtde Unid\. Comercial\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Qtde Unid\. Comercial\s*[:\n]*\s*([\d\.,]+)", block) else "0").replace(',', ''),
+                    "v_unit": re.sub(r'[^\d,]', '', re.search(r"Valor Unit Cond Venda\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Valor Unit Cond Venda\s*[:\n]*\s*([\d\.,]+)", block) else "0").replace(',', '')
+                })
+        return data
+
+    @staticmethod
+    def build_duimp_xml(data):
+        root = ET.Element("ListaDeclaracoes")
+        duimp = ET.SubElement(root, "duimp")
+        for item in data["itens"]:
+            ad = ET.SubElement(duimp, "adicao")
+            acr = ET.SubElement(ad, "acrescimo")
+            ET.SubElement(acr, "codigoAcrescimo").text = "17"
+            ET.SubElement(acr, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"
+            ET.SubElement(acr, "moedaNegociadaCodigo").text = "978"
+            ET.SubElement(acr, "valorReais").text = "000000000106601"
+            ET.SubElement(ad, "dadosMercadoriaCodigoNcm").text = item["ncm"]
+            ET.SubElement(ad, "dadosMercadoriaPesoLiquido").text = item["peso"].zfill(15)
+            merc = ET.SubElement(ad, "mercadoria")
+            ET.SubElement(merc, "descricaoMercadoria").text = item["descricao"]
+            ET.SubElement(merc, "numeroSequencialItem").text = item["seq"].zfill(2)
+            ET.SubElement(merc, "quantidade").text = item["qtd"].zfill(14)
+            ET.SubElement(merc, "valorUnitario").text = item["v_unit"].zfill(20)
+            ET.SubElement(ad, "numeroDUIMP").text = data["header"]["duimp"].replace("25BR", "")[:10]
+        ET.SubElement(duimp, "importadorNome").text = "HAFELE BRASIL LTDA"
+        return root
+
+    # --- MÉTODO 3: CTE MASSIVE PROCESSOR (UP TO 1M) ---
+    @staticmethod
+    def process_cte_massive(files):
+        data_list = []
+        ns = {'cte': 'http://www.portalfiscal.inf.br/cte'}
+        progress_bar = st.progress(0)
+        status = st.empty()
+        total = len(files)
+        
+        for idx, file in enumerate(files):
+            try:
+                root = ET.fromstring(file.read())
+                def find_t(path):
+                    found = root.find(f'.//{{{ns["cte"]}}}{path}')
+                    if found is None: found = root.find(f'.//{path}')
+                    return found.text if found is not None else ""
+                
+                # Busca de peso inteligente
+                peso_val, tipo_p = 0.0, "N/A"
+                for infQ in root.findall(f'.//{{{ns["cte"]}}}infQ') or root.findall('.//infQ'):
+                    tpMed = infQ.find(f'{{{ns["cte"]}}}tpMed') or infQ.find('tpMed')
+                    qCarga = infQ.find(f'{{{ns["cte"]}}}qCarga') or infQ.find('qCarga')
+                    if tpMed is not None and qCarga is not None:
+                        if any(x in tpMed.text.upper() for x in ['PESO BRUTO', 'PESO BASE', 'PESO']):
+                            peso_val = float(qCarga.text or 0)
+                            tipo_p = tpMed.text.upper()
+                            break
+
+                data_list.append({
+                    "nCT": find_t('nCT'),
+                    "Emissao": find_t('dhEmi')[:10],
+                    "Emitente": find_t('emit/xNome')[:40],
+                    "Destinatario": find_t('dest/xNome')[:40],
+                    "Peso_KG": peso_val,
+                    "Tipo_Peso": tipo_p,
+                    "Valor": float(find_t('vTPrest') or 0),
+                    "Chave": find_t('infNFe/chave')
+                })
+                
+                if (idx + 1) % 500 == 0 or (idx + 1) == total:
+                    progress_bar.progress((idx + 1) / total)
+                    status.text(f"Processando: {idx+1}/{total}")
+            except: continue
+            
+        return pd.DataFrame(data_list)
+
+# --- APLICAÇÃO ---
+
 def main():
-    apply_custom_ui()
-    
-    # Header Häfele Style
+    apply_ui_style()
+    engine = DataEngine()
+
     st.markdown(f"""
-    <div class="header-container">
+    <div class="header-box">
         <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="hafele-logo">
-        <h1>Sistema Integrado de Processamento</h1>
-        <p>TXT Clean & Ultra-Scale XML CTe (Otimizado para 1.000.000+ registros)</p>
+        <h1>Data Management Hub</h1>
+        <p>Unificação de Processos: TXT Cleaner | Massive CT-e | DUIMP Official Layout</p>
     </div>
     """, unsafe_allow_html=True)
 
-    tab_cte, tab_txt = st.tabs(["🚚 Processamento Massivo CT-e", "📄 Limpeza de Arquivos TXT"])
+    tab1, tab2, tab3 = st.tabs(["🚚 Processamento CT-e (Escala)", "📄 Conversor DUIMP PDF/XML", "📝 Limpeza de TXT"])
 
-    # --- ABA CT-E ---
-    with tab_cte:
-        proc = HighScaleCTeProcessor()
-        
-        col_up, col_stats = st.columns([1, 2])
-        
-        with col_up:
-            st.subheader("Upload de Lote")
-            files = st.file_uploader("Arraste milhares de XMLs aqui", type="xml", accept_multiple_files=True)
-            if st.button("🚀 Iniciar Processamento de Lote"):
-                if files:
-                    start_time = time.time()
-                    count = proc.process_xml_batch(files)
-                    duration = time.time() - start_time
-                    st.success(f"Finalizado! {count} arquivos processados em {duration:.2f}s")
-                else:
-                    st.warning("Selecione os arquivos primeiro.")
+    # TAB 1: CT-E MASSIVO
+    with tab1:
+        st.subheader("Processamento de CT-e para Power BI")
+        uploaded_ctes = st.file_uploader("Upload XMLs de CT-e (Suporta Lotes de até 1 milhão)", type="xml", accept_multiple_files=True)
+        if uploaded_ctes and st.button("🚀 Processar CT-es"):
+            df_cte = engine.process_cte_massive(uploaded_ctes)
+            st.success(f"Processado {len(df_cte)} arquivos com sucesso!")
+            st.dataframe(df_cte.head(50), use_container_width=True)
+            
+            csv = df_cte.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Baixar Base Consolidada (CSV)", csv, "base_cte_consolidada.csv", "text/csv")
 
-        # Dashboard de Dados
-        if not st.session_state.db_cte.empty:
-            df = st.session_state.db_cte
+    # TAB 2: DUIMP (LAYOUT HAFELE)
+    with tab2:
+        st.subheader("Conversor DUIMP (Layout Oficial)")
+        pdf_duimp = st.file_uploader("Selecione o PDF de Conferência", type="pdf")
+        if pdf_duimp and st.button("🛠️ Gerar XML Häfele"):
+            data_duimp = engine.parse_duimp_pdf(pdf_duimp)
+            xml_res = engine.build_duimp_xml(data_duimp)
+            xml_str = minidom.parseString(ET.tostring(xml_res, 'utf-8')).toprettyxml(indent="    ")
             
-            st.markdown("---")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total CT-e", f"{len(df):,}")
-            c2.metric("Peso Total (T)", f"{df['Peso_KG'].sum()/1000:,.2f}")
-            c3.metric("Valor Total", f"R$ {df['Valor_Prestacao'].sum():,.2f}")
-            c4.metric("Ticket Médio", f"R$ {df['Valor_Prestacao'].mean():,.2f}")
+            st.info(f"Processo: {data_duimp['header']['processo']} | Itens: {len(data_duimp['itens'])}")
+            st.download_button("📥 Baixar XML Oficial", xml_str, f"DUIMP_{data_duimp['header']['processo']}.xml", "text/xml")
+            with st.expander("Prévia da Descrição (Item 1)"):
+                st.code(data_duimp['itens'][0]['descricao'])
 
-            st.subheader("Visualização dos Dados")
-            st.dataframe(df.head(100), use_container_width=True) # Mostra apenas 100 para não travar a UI
-            
-            # Exportação Otimizada
-            st.subheader("Exportar Base Completa")
-            export_format = st.selectbox("Formato", ["Excel", "CSV"])
-            
-            if export_format == "Excel":
-                # Para 1M de linhas, o Excel tem limite de 1.048.576. 
-                # Se passar disso, sugerimos CSV.
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False)
-                st.download_button("📥 Baixar Excel Completo", buffer.getvalue(), "base_cte.xlsx")
-            else:
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Baixar CSV Completo", csv, "base_cte.csv")
-            
-            if st.button("🗑️ Resetar Banco de Dados"):
-                st.session_state.db_cte = pd.DataFrame()
-                st.rerun()
-
-    # --- ABA TXT ---
-    with tab_txt:
-        st.subheader("Limpeza de Arquivos Sped/TXT")
-        txt_file = st.file_uploader("Upload arquivo TXT", type="txt")
-        
-        if txt_file:
-            if st.button("🪄 Limpar e Processar TXT"):
-                content = txt_file.read()
-                cleaned = TextProcessor.clean_txt(content)
-                
-                st.text_area("Prévia do Resultado", cleaned[:1000], height=200)
-                
-                st.download_button(
-                    label="📥 Baixar TXT Processado",
-                    data=cleaned,
-                    file_name=f"CLEAN_{txt_file.name}",
-                    mime="text/plain"
-                )
+    # TAB 3: TXT CLEANER
+    with tab3:
+        st.subheader("Limpeza de Arquivos TXT/Sped")
+        txt_file = st.file_uploader("Selecione o arquivo TXT", type="txt")
+        if txt_file and st.button("🪄 Limpar Linhas"):
+            res_txt, total = engine.clean_txt(txt_file.read(), ["-------", "SPED EFD-ICMS/IPI"])
+            st.success(f"Processado! Linhas originais: {total}")
+            st.download_button("📥 Baixar TXT Limpo", res_txt, f"CLEAN_{txt_file.name}", "text/plain")
 
 if __name__ == "__main__":
     main()
