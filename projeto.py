@@ -1,4 +1,9 @@
 import streamlit as st
+import pdfplumber
+import re
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
+import time
 import sqlite3
 from datetime import datetime, timedelta, date
 import pandas as pd
@@ -11,18 +16,16 @@ import contextlib
 import chardet
 from io import BytesIO
 import base64
-import time
-import xml.etree.ElementTree as ET
+import xml.dom.minidom
 import os
 import hashlib
-import xml.dom.minidom
 import traceback
 from pathlib import Path
 import numpy as np
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
-    page_title="Sistema de Processamento",
+    page_title="Sistema de Processamento Hafele",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -39,13 +42,282 @@ if 'selected_xml' not in st.session_state:
 if 'cte_data' not in st.session_state:
     st.session_state.cte_data = None
 
+# --- UI PROFESSIONAL & CLEAN (MODERN SAAS STYLE) ---
+def apply_clean_ui():
+    st.markdown("""
+    <style>
+    /* Reset e Fundo Sóbrio */
+    .stApp {
+        background-color: #f8fafc;
+        color: #1e293b;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+
+    /* Container Principal */
+    .main-box {
+        background-color: #ffffff;
+        padding: 40px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        margin-top: 2rem;
+    }
+
+    /* Cabeçalhos */
+    h1 {
+        color: #0f172a;
+        font-weight: 800;
+        font-size: 2.5rem !important;
+        letter-spacing: -0.025em;
+        margin-bottom: 1rem;
+        background: linear-gradient(90deg, #2c3e50, #3498db);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    h2 {
+        color: #1e293b;
+        font-weight: 700;
+        font-size: 1.75rem !important;
+        margin: 1.5rem 0 1rem 0;
+        padding-left: 10px;
+        border-left: 5px solid #2563eb;
+    }
+
+    h3 {
+        color: #334155;
+        font-weight: 600;
+        font-size: 1.25rem !important;
+    }
+
+    /* Botão Primário Estilo Profissional */
+    .stButton > button {
+        background-color: #2563eb !important;
+        color: white !important;
+        border-radius: 8px !important;
+        border: none !important;
+        padding: 0.75rem 2rem !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease-in-out;
+        box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+    }
+    .stButton > button:hover {
+        background-color: #1d4ed8 !important;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(37, 99, 235, 0.3);
+    }
+
+    /* Barra de Progresso Discreta */
+    .stProgress > div > div > div > div {
+        background-color: #2563eb;
+        border-radius: 4px;
+    }
+
+    /* Inputs e Upload */
+    .stFileUploader {
+        border: 2px dashed #cbd5e1;
+        border-radius: 12px;
+        padding: 20px;
+        background: #f8fafc;
+        transition: border-color 0.2s;
+    }
+    .stFileUploader:hover {
+        border-color: #2563eb;
+    }
+
+    /* Alertas e Badges */
+    .stAlert {
+        border-radius: 10px;
+        border: none;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Abas */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px 8px 0 0;
+        padding: 12px 24px;
+        font-weight: 600;
+        border: 1px solid #e2e8f0;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #2563eb !important;
+        color: white !important;
+    }
+
+    /* Cards */
+    .card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+        padding: 1.8rem;
+        margin-bottom: 1.8rem;
+        border: 1px solid #e2e8f0;
+    }
+
+    /* Cover Container */
+    .cover-container {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
+        padding: 4rem;
+        border-radius: 20px;
+        margin-bottom: 3rem;
+        text-align: center;
+        border: 1px solid #e2e8f0;
+    }
+    .cover-logo {
+        max-width: 400px;
+        margin-bottom: 2rem;
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    }
+    .cover-title {
+        font-size: 3rem;
+        font-weight: 900;
+        margin-bottom: 1rem;
+        background: linear-gradient(90deg, #1e3a8a, #2563eb);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .cover-subtitle {
+        font-size: 1.4rem;
+        color: #64748b;
+        margin-bottom: 0;
+        font-weight: 500;
+    }
+
+    /* Spinner Animation */
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    .spinner {
+        animation: spin 2s linear infinite;
+        display: inline-block;
+        font-size: 24px;
+    }
+
+    /* Métricas */
+    .stMetric {
+        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        border-radius: 12px;
+        padding: 1.5rem;
+        border: 1px solid #e2e8f0;
+    }
+
+    /* Dataframe */
+    .dataframe {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid #e2e8f0;
+    }
+
+    /* Expanders */
+    .streamlit-expanderHeader {
+        background-color: #f8fafc;
+        border-radius: 8px;
+        font-weight: 600;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- FUNÇÕES DE APOIO (DUIMP) ---
+def clean_val(val):
+    if not val: return "0"
+    return re.sub(r'[^\d,]', '', str(val)).replace(',', '')
+
+def format_xml_num(val, length):
+    return clean_val(val).zfill(length)
+
+def clean_partnumber(text):
+    if not text: return ""
+    # Remove rótulos preservando o código
+    words = ["CÓDIGO", "CODIGO", "INTERNO", "PARTNUMBER", r"\(", r"\)"]
+    for w in words:
+        text = re.search(f"{w}(.*)", text, re.I).group(1) if re.search(w, text, re.I) else text
+    return re.sub(r'\s+', ' ', text).strip().lstrip("- ").strip()
+
+# --- EXTRAÇÃO DO PDF (DUIMP) ---
+def parse_pdf(pdf_file):
+    text = ""
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() or ""
+    
+    data = {"header": {}, "itens": []}
+    data["header"]["processo"] = re.search(r"PROCESSO\s*#?(\d+)", text, re.I).group(1) if re.search(r"PROCESSO\s*#?(\d+)", text, re.I) else "N/A"
+    data["header"]["duimp"] = re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", text, re.I).group(1) if re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", text, re.I) else "N/A"
+    
+    parts = re.split(r"ITENS DA DUIMP\s*[-–]?\s*(\d+)", text)
+    if len(parts) > 1:
+        for i in range(1, len(parts), 2):
+            num = parts[i]
+            block = parts[i+1]
+            
+            raw_desc = re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+C[ÓO]DIGO", block, re.S).group(1) if re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+C[ÓO]DIGO", block, re.S) else ""
+            raw_pn = re.search(r"PARTNUMBER\)\s*(.*?)\s*(?:PAIS|FABRICANTE|CONDICAO)", block, re.S).group(1) if re.search(r"PARTNUMBER\)\s*(.*?)\s*(?:PAIS|FABRICANTE|CONDICAO)", block, re.S) else ""
+            
+            pn = clean_partnumber(raw_pn)
+            final_desc = f"{pn} - {re.sub(r'\s+', ' ', raw_desc).strip()}" if pn else raw_desc
+            
+            data["itens"].append({
+                "seq": num,
+                "descricao": final_desc,
+                "ncm": re.search(r"NCM\s*[:\n]*\s*([\d\.]+)", block).group(1).replace(".", "") if re.search(r"NCM\s*[:\n]*\s*([\d\.]+)", block) else "00000000",
+                "peso": re.search(r"Peso Líquido \(KG\)\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Peso Líquido \(KG\)\s*[:\n]*\s*([\d\.,]+)", block) else "0",
+                "qtd": re.search(r"Qtde Unid\. Comercial\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Qtde Unid\. Comercial\s*[:\n]*\s*([\d\.,]+)", block) else "0",
+                "v_unit": re.search(r"Valor Unit Cond Venda\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Valor Unit Cond Venda\s*[:\n]*\s*([\d\.,]+)", block) else "0"
+            })
+    return data
+
+# --- GERADOR XML (ESTRUTURA HAFELE OBRIGATÓRIA) ---
+def generate_xml(data):
+    root = ET.Element("ListaDeclaracoes")
+    duimp = ET.SubElement(root, "duimp")
+    
+    for item in data["itens"]:
+        ad = ET.SubElement(duimp, "adicao")
+        
+        # Estrutura obrigatória conforme arquivo enviado
+        acr = ET.SubElement(ad, "acrescimo")
+        ET.SubElement(acr, "codigoAcrescimo").text = "17"
+        ET.SubElement(acr, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"
+        ET.SubElement(acr, "moedaNegociadaCodigo").text = "978"
+        ET.SubElement(acr, "valorReais").text = "000000000106601"
+        
+        # Tags de controle e impostos
+        ET.SubElement(ad, "codigoRelacaoCompradorVendedor").text = "3"
+        ET.SubElement(ad, "codigoVinculoCompradorVendedor").text = "1"
+        ET.SubElement(ad, "cofinsAliquotaAdValorem").text = "00965"
+        ET.SubElement(ad, "dadosMercadoriaCodigoNcm").text = item["ncm"]
+        ET.SubElement(ad, "dadosMercadoriaPesoLiquido").text = format_xml_num(item["peso"], 15)
+        
+        # Tag Mercadoria (Onde entra a Descrição + PN)
+        merc = ET.SubElement(ad, "mercadoria")
+        ET.SubElement(merc, "descricaoMercadoria").text = item["descricao"]
+        ET.SubElement(merc, "numeroSequencialItem").text = item["seq"].zfill(2)
+        ET.SubElement(merc, "quantidade").text = format_xml_num(item["qtd"], 14)
+        ET.SubElement(merc, "unidadeMedida").text = "UNIDADE"
+        ET.SubElement(merc, "valorUnitario").text = format_xml_num(item["v_unit"], 20)
+        
+        ET.SubElement(ad, "numeroAdicao").text = item["seq"].zfill(3)
+        ET.SubElement(ad, "numeroDUIMP").text = data["header"]["duimp"].replace("25BR", "")[:10]
+        ET.SubElement(ad, "pisPasepAliquotaAdValorem").text = "00210"
+
+    ET.SubElement(duimp, "importadorNome").text = "HAFELE BRASIL LTDA"
+    ET.SubElement(duimp, "totalAdicoes").text = str(len(data["itens"])).zfill(3)
+    ET.SubElement(duimp, "urfDespachoNome").text = "PORTO DE PARANAGUA"
+    
+    return root
+
 # --- ANIMAÇÕES DE CARREGAMENTO ---
 def show_loading_animation(message="Processando..."):
     """Exibe uma animação de carregamento"""
     with st.spinner(message):
         progress_bar = st.progress(0)
         for i in range(100):
-            time.sleep(0.01)
+            time.sleep(0.005)
             progress_bar.progress(i + 1)
         progress_bar.empty()
 
@@ -60,7 +332,7 @@ def show_processing_animation(message="Analisando dados..."):
             spinner_chars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
             for i in range(20):
                 spinner_placeholder.markdown(f"<div style='text-align: center; font-size: 24px;'>{spinner_chars[i % 8]}</div>", unsafe_allow_html=True)
-                time.sleep(0.1)
+                time.sleep(0.05)
     placeholder.empty()
 
 def show_success_animation(message="Concluído!"):
@@ -71,109 +343,46 @@ def show_success_animation(message="Concluído!"):
         time.sleep(1.5)
     success_placeholder.empty()
 
-# --- FUNÇÕES DO PROCESSADOR DE ARQUIVOS ---
-def processador_txt():
-    st.title("📄 Processador de Arquivos TXT")
-    st.markdown("""
-    <div class="card">
-        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
-    </div>
-    """, unsafe_allow_html=True)
+# --- FUNÇÕES DO PROCESSADOR DE ARQUIVOS TXT ---
+def detectar_encoding(conteudo):
+    """Detecta o encoding do conteúdo do arquivo"""
+    resultado = chardet.detect(conteudo)
+    return resultado['encoding']
 
-    def detectar_encoding(conteudo):
-        """Detecta o encoding do conteúdo do arquivo"""
-        resultado = chardet.detect(conteudo)
-        return resultado['encoding']
-
-    def processar_arquivo(conteudo, padroes):
-        """
-        Processa o conteúdo do arquivo removendo linhas indesejadas e realizando substituições
-        """
+def processar_arquivo_txt(conteudo, padroes):
+    """
+    Processa o conteúdo do arquivo removendo linhas indesejadas e realizando substituições
+    """
+    try:
+        substituicoes = {
+            "IMPOSTO IMPORTACAO": "IMP IMPORT",
+            "TAXA SICOMEX": "TX SISCOMEX",
+            "FRETE INTERNACIONAL": "FRET INTER",
+            "SEGURO INTERNACIONAL": "SEG INTERN"
+        }
+        
+        encoding = detectar_encoding(conteudo)
+        
         try:
-            substituicoes = {
-                "IMPOSTO IMPORTACAO": "IMP IMPORT",
-                "TAXA SICOMEX": "TX SISCOMEX",
-                "FRETE INTERNACIONAL": "FRET INTER",
-                "SEGURO INTERNACIONAL": "SEG INTERN"
-            }
-            
-            encoding = detectar_encoding(conteudo)
-            
-            try:
-                texto = conteudo.decode(encoding)
-            except UnicodeDecodeError:
-                texto = conteudo.decode('latin-1')
-            
-            linhas = texto.splitlines()
-            linhas_processadas = []
-            
-            for linha in linhas:
-                linha = linha.strip()
-                if not any(padrao in linha for padrao in padroes):
-                    for original, substituto in substituicoes.items():
-                        linha = linha.replace(original, substituto)
-                    linhas_processadas.append(linha)
-            
-            return "\n".join(linhas_processadas), len(linhas)
+            texto = conteudo.decode(encoding)
+        except UnicodeDecodeError:
+            texto = conteudo.decode('latin-1')
         
-        except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {str(e)}")
-            return None, 0
-
-    # Padrões padrão para remoção
-    padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
-    
-    # Upload do arquivo
-    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
-    
-    # Opções avançadas
-    with st.expander("⚙️ Configurações avançadas", expanded=False):
-        padroes_adicionais = st.text_input(
-            "Padrões adicionais para remoção (separados por vírgula)",
-            help="Exemplo: padrão1, padrão2, padrão3"
-        )
+        linhas = texto.splitlines()
+        linhas_processadas = []
         
-        padroes = padroes_default + [
-            p.strip() for p in padroes_adicionais.split(",") 
-            if p.strip()
-        ] if padroes_adicionais else padroes_default
-
-    if arquivo is not None:
-        if st.button("🔄 Processar Arquivo TXT"):
-            try:
-                show_loading_animation("Analisando arquivo TXT...")
-                conteudo = arquivo.read()
-                show_processing_animation("Processando linhas...")
-                resultado, total_linhas = processar_arquivo(conteudo, padroes)
-                
-                if resultado is not None:
-                    show_success_animation("Arquivo processado com sucesso!")
-                    
-                    linhas_processadas = len(resultado.splitlines())
-                    st.success(f"""
-                    **Processamento concluído!**  
-                    ✔️ Linhas originais: {total_linhas}  
-                    ✔️ Linhas processadas: {linhas_processadas}  
-                    ✔️ Linhas removidas: {total_linhas - linhas_processadas}
-                    """)
-
-                    st.subheader("Prévia do resultado")
-                    st.text_area("Conteúdo processado", resultado, height=300)
-
-                    buffer = BytesIO()
-                    buffer.write(resultado.encode('utf-8'))
-                    buffer.seek(0)
-                    
-                    st.download_button(
-                        label="⬇️ Baixar arquivo processado",
-                        data=buffer,
-                        file_name=f"processado_{arquivo.name}",
-                        mime="text/plain"
-                    )
-            
-            except Exception as e:
-                st.error(f"Erro inesperado: {str(e)}")
-                st.info("Tente novamente ou verifique o arquivo.")
+        for linha in linhas:
+            linha = linha.strip()
+            if not any(padrao in linha for padrao in padroes):
+                for original, substituto in substituicoes.items():
+                    linha = linha.replace(original, substituto)
+                linhas_processadas.append(linha)
+        
+        return "\n".join(linhas_processadas), len(linhas)
+    
+    except Exception as e:
+        st.error(f"Erro ao processar o arquivo: {str(e)}")
+        return None, 0
 
 # --- PROCESSADOR CT-E COM EXTRAÇÃO DO PESO BRUTO E PESO BASE DE CÁLCULO ---
 class CTeProcessorDirect:
@@ -350,7 +559,7 @@ class CTeProcessorDirect:
                 'Emitente': emit_xNome or 'N/A',
                 'Valor Prestação': vTPrest,
                 'Peso Bruto (kg)': peso_bruto,
-                'Tipo de Peso Encontrado': tipo_peso_encontrado,  # NOVO CAMPO
+                'Tipo de Peso Encontrado': tipo_peso_encontrado,
                 'Remetente': rem_xNome or 'N/A',
                 'Destinatário': dest_xNome or 'N/A',
                 'Documento Destinatário': documento_destinatario,
@@ -457,9 +666,12 @@ def add_simple_trendline(fig, x, y):
         # Se houver erro, simplesmente não adiciona a linha de tendência
         pass
 
+# --- FUNÇÃO PRINCIPAL DO PROCESSADOR CT-E ---
 def processador_cte():
     """Interface para o sistema de CT-e com extração do peso bruto"""
     processor = CTeProcessorDirect()
+    
+    st.markdown('<div class="main-box">', unsafe_allow_html=True)
     
     st.title("🚚 Processador de CT-e para Power BI")
     st.markdown("### Processa arquivos XML de CT-e e gera planilha para análise")
@@ -708,83 +920,146 @@ def processador_cte():
                 
         else:
             st.warning("Nenhum dado disponível para exportação.")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# --- CSS E CONFIGURAÇÃO DE ESTILO ---
-def load_css():
+# --- FUNÇÃO PRINCIPAL DO PROCESSADOR TXT ---
+def processador_txt_tab():
+    st.markdown('<div class="main-box">', unsafe_allow_html=True)
+    
+    st.title("📄 Processador de Arquivos TXT")
     st.markdown("""
-    <style>
-        .cover-container {
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
-            padding: 3rem;
-            border-radius: 12px;
-            margin-bottom: 2rem;
-            text-align: center;
-        }
-        .cover-logo {
-            max-width: 300px;
-            margin-bottom: 1.5rem;
-        }
-        .cover-title {
-            font-size: 2.8rem;
-            font-weight: 800;
-            margin-bottom: 1rem;
-            background: linear-gradient(90deg, #2c3e50, #3498db);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .cover-subtitle {
-            font-size: 1.2rem;
-            color: #7f8c8d;
-            margin-bottom: 0;
-        }
-        .header {
-            font-size: 1.8rem;
-            font-weight: 700;
-            margin: 1.5rem 0 1rem 0;
-            padding-left: 10px;
-            border-left: 5px solid #2c3e50;
-        }
-        .card {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            padding: 1.8rem;
-            margin-bottom: 1.8rem;
-        }
-        .stButton>button {
-            width: 100%;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .spinner {
-            animation: spin 2s linear infinite;
-            display: inline-block;
-            font-size: 24px;
-        }
-    </style>
+    <div class="card">
+        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
+    </div>
     """, unsafe_allow_html=True)
+    
+    # Padrões padrão para remoção
+    padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
+    
+    # Upload do arquivo
+    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
+    
+    # Opções avançadas
+    with st.expander("⚙️ Configurações avançadas", expanded=False):
+        padroes_adicionais = st.text_input(
+            "Padrões adicionais para remoção (separados por vírgula)",
+            help="Exemplo: padrão1, padrão2, padrão3"
+        )
+        
+        padroes = padroes_default + [
+            p.strip() for p in padroes_adicionais.split(",") 
+            if p.strip()
+        ] if padroes_adicionais else padroes_default
+
+    if arquivo is not None:
+        if st.button("🔄 Processar Arquivo TXT"):
+            try:
+                show_loading_animation("Analisando arquivo TXT...")
+                conteudo = arquivo.read()
+                show_processing_animation("Processando linhas...")
+                resultado, total_linhas = processar_arquivo_txt(conteudo, padroes)
+                
+                if resultado is not None:
+                    show_success_animation("Arquivo processado com sucesso!")
+                    
+                    linhas_processadas = len(resultado.splitlines())
+                    st.success(f"""
+                    **Processamento concluído!**  
+                    ✔️ Linhas originais: {total_linhas}  
+                    ✔️ Linhas processadas: {linhas_processadas}  
+                    ✔️ Linhas removidas: {total_linhas - linhas_processadas}
+                    """)
+
+                    st.subheader("Prévia do resultado")
+                    st.text_area("Conteúdo processado", resultado, height=300)
+
+                    buffer = BytesIO()
+                    buffer.write(resultado.encode('utf-8'))
+                    buffer.seek(0)
+                    
+                    st.download_button(
+                        label="⬇️ Baixar arquivo processado",
+                        data=buffer,
+                        file_name=f"processado_{arquivo.name}",
+                        mime="text/plain"
+                    )
+            
+            except Exception as e:
+                st.error(f"Erro inesperado: {str(e)}")
+                st.info("Tente novamente ou verifique o arquivo.")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# --- FUNÇÃO PRINCIPAL DO CONVERSOR DUIMP ---
+def conversor_duimp_tab():
+    st.markdown('<div class="main-box">', unsafe_allow_html=True)
+    
+    st.title("Conversor de DUIMP")
+    st.markdown("Extração de dados para o layout XML Hafele.")
+    
+    uploaded_file = st.file_uploader("Selecione o Extrato de Conferência (PDF)", type="pdf")
+    
+    if uploaded_file:
+        if st.button("PROCESSAR ARQUIVO"):
+            with st.spinner("Extraindo dados..."):
+                progress = st.progress(0)
+                for i in range(100):
+                    time.sleep(0.005)
+                    progress.progress(i + 1)
+                
+                try:
+                    res = parse_pdf(uploaded_file)
+                    if res["itens"]:
+                        xml_root = generate_xml(res)
+                        xml_output = minidom.parseString(ET.tostring(xml_root, 'utf-8')).toprettyxml(indent="    ")
+                        
+                        st.success("Arquivo processado com sucesso.")
+                        
+                        col1, col2 = st.columns(2)
+                        col1.metric("Total de Itens", len(res["itens"]))
+                        col2.metric("Nº Processo", res["header"]["processo"])
+                        
+                        st.markdown("---")
+                        st.markdown("**Validação de Descrição (Item 1):**")
+                        st.text(res["itens"][0]["descricao"])
+                        
+                        st.download_button(
+                            label="BAIXAR XML COMPATÍVEL",
+                            data=xml_output,
+                            file_name=f"DUIMP_{res['header']['processo']}.xml",
+                            mime="text/xml"
+                        )
+                    else:
+                        st.error("Nenhum item identificado no PDF.")
+                except Exception as e:
+                    st.error(f"Erro no processamento: {e}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     """Função principal que gerencia o fluxo da aplicação."""
-    load_css()
+    apply_clean_ui()
     
+    # Header com logo
     st.markdown("""
     <div class="cover-container">
-        <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
-        <h1 class="cover-title">Sistema de Processamento de Arquivos</h1>
-        <p class="cover-subtitle">Processamento de TXT e CT-e para análise de dados</p>
+        <h1 class="cover-title">Sistema de Processamento Hafele</h1>
+        <p class="cover-subtitle">Processamento integrado de DUIMP, TXT e CT-e para análise de dados</p>
     </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["📄 Processador TXT", "🚚 Processador CT-e"])
+    # Cria abas
+    tab1, tab2, tab3 = st.tabs(["📄 Conversor DUIMP", "📄 Processador TXT", "🚚 Processador CT-e"])
     
     with tab1:
-        processador_txt()
+        conversor_duimp_tab()
     
     with tab2:
+        processador_txt_tab()
+    
+    with tab3:
         processador_cte()
 
 if __name__ == "__main__":
