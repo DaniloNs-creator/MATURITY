@@ -160,31 +160,43 @@ def apply_clean_ui():
     /* Cover Container */
     .cover-container {
         background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
-        padding: 4rem;
+        padding: 2rem;
         border-radius: 20px;
-        margin-bottom: 3rem;
+        margin-bottom: 2rem;
         text-align: center;
         border: 1px solid #e2e8f0;
     }
     .cover-logo {
-        max-width: 400px;
-        margin-bottom: 2rem;
-        border-radius: 12px;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        max-width: 350px;
+        margin: 0 auto 1.5rem auto;
+        display: block;
+        filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
     }
     .cover-title {
-        font-size: 3rem;
-        font-weight: 900;
-        margin-bottom: 1rem;
-        background: linear-gradient(90deg, #1e3a8a, #2563eb);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        font-size: 2.2rem;
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+        color: #1e3a8a;
+        text-align: center;
     }
     .cover-subtitle {
-        font-size: 1.4rem;
+        font-size: 1.2rem;
         color: #64748b;
         margin-bottom: 0;
         font-weight: 500;
+        text-align: center;
+    }
+
+    /* Logo Container */
+    .logo-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    .logo-img {
+        max-height: 80px;
+        object-fit: contain;
     }
 
     /* Spinner Animation */
@@ -1042,9 +1054,14 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     apply_clean_ui()
     
-    # Header com logo
+    # Header com logo e título
     st.markdown("""
     <div class="cover-container">
+        <div class="logo-container">
+            <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/main/haefele_logo.png" 
+                 alt="Hafele Logo" 
+                 class="cover-logo">
+        </div>
         <h1 class="cover-title">Sistema de Processamento Hafele</h1>
         <p class="cover-subtitle">Processamento integrado de DUIMP, TXT e CT-e para análise de dados</p>
     </div>
