@@ -1062,7 +1062,7 @@ def main():
                  alt="Hafele Logo" 
                  class="cover-logo">
         </div>
-        <h1 class="cover-title">Sistema de Processamento Hafele</h1>
+        <h1 class="cover-title">SISTEM HAFELE</h1>
         <p class="cover-subtitle">Processamento integrado de DUIMP, TXT e CT-e para análise de dados</p>
     </div>
     """, unsafe_allow_html=True)
