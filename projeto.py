@@ -25,7 +25,7 @@ import numpy as np
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
-    page_title="Sistema de Processamento Hafele",
+    page_title="SISTEM HAFELE",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
