@@ -4,40 +4,44 @@ import pandas as pd
 import re
 import io
 
-# Configuração da página para dar mais espaço à tabela
+# Configuração da página
 st.set_page_config(page_title="Extrator DUIMP HAFELE", layout="wide")
+
+# --- FUNÇÕES AUXILIARES ---
 
 def clean_number(num_str):
     """
-    Converte string numérica brasileira (1.234,5678) para float (1234.5678).
-    Retorna 0.0 se falhar.
+    Converte string numérica brasileira (ex: '1.065,1600000') para float (1065.16).
+    Retorna 0.0 se a string for vazia ou inválida.
     """
     if not num_str:
         return 0.0
     try:
-        # Remove pontos de milhar e substitui vírgula decimal por ponto
+        # Remove ponto de milhar e troca vírgula por ponto
         cleaned = num_str.replace('.', '').replace(',', '.')
         return float(cleaned)
     except:
         return 0.0
 
-def extract_tax_value(tax_name, text_block):
+def extract_federal_tax(tax_name, text_block):
     """
-    Busca o valor 'A Recolher' para um imposto específico dentro do bloco de texto do item.
-    Lógica: Encontra o cabeçalho do imposto (ex: 'II') e busca o padrão numérico 
-    imediatamente antes da frase 'Valor A Recolher'.
+    Extrai o 'Valor A Recolher' de impostos federais (II, IPI, PIS, COFINS).
+    Padrão identificado:
+       [NOME IMPOSTO]
+       ...
+       [VALOR] Valor A Recolher
     """
     try:
-        # 1. Isolar o bloco do imposto específico (do nome do imposto até o próximo rótulo ou fim)
-        # O regex busca, por exemplo, de "II" até o próximo imposto ou fim do bloco
-        pattern_block = re.compile(rf'{tax_name}\n(.*?)(?=\n[A-Z]{{2,}}|\Z)', re.DOTALL)
-        match_block = pattern_block.search(text_block)
+        # 1. Localiza o bloco que começa com o Nome do Imposto (ex: "II")
+        # e vai até o próximo imposto ou fim da seção, para evitar pegar valores errados.
+        # O regex (?=\n[A-Z]+|\Z) olha para frente para parar antes do próximo título.
+        pattern = re.compile(rf'{tax_name}\n(.*?)(?=\n[A-Z]+|\Z)', re.DOTALL)
+        match = pattern.search(text_block)
         
-        if match_block:
-            content = match_block.group(1)
-            # 2. Dentro desse bloco, buscar o valor associado a "Valor A Recolher"
-            # O padrão no seu PDF é: "134,0800000 Valor A Recolher"
-            val_match = re.search(r'([\d\.]+,\d+)\s+Valor A Recolher', content)
+        if match:
+            block_content = match.group(1)
+            # 2. Dentro desse bloco, busca o número antes da frase "Valor A Recolher"
+            val_match = re.search(r'([\d\.]+,\d+)\s+Valor A Recolher', block_content)
             if val_match:
                 return clean_number(val_match.group(1))
     except Exception:
@@ -46,175 +50,152 @@ def extract_tax_value(tax_name, text_block):
 
 def extract_icms(text_block):
     """
-    Extrai dados do ICMS que tem um formato ligeiramente diferente no rodapé do item.
-    Padrão: 0,00 0,00 Valor Devido Base de Cálculo
+    Extrai o ICMS baseado no padrão:
+    '0,00 0,00 Valor Devido Base de Cálculo'
+    O primeiro número é o Valor Devido, o segundo é a Base.
     """
     try:
-        # Busca a seção de ICMS
         if "INFORMAÇÕES DO ICMS DA MERCADORIA" in text_block:
-            # Tenta capturar a linha de valores
-            # Procura por dois números seguidos de "Valor Devido Base de Cálculo"
+            # Pega a linha exata que contém "Valor Devido Base de Cálculo"
+            # Captura dois grupos numéricos antes dessa frase
             match = re.search(r'([\d\.]+,\d+)\s+([\d\.]+,\d+)\s+Valor Devido Base de Cálculo', text_block)
             if match:
                 valor_devido = clean_number(match.group(1))
-                base_calculo = clean_number(match.group(2))
-                return valor_devido, base_calculo
-    except:
-        pass
-    return 0.0, 0.0
+                return valor_devido
+    except Exception:
+        return 0.0
+    return 0.0
 
-def process_pdf(pdf_file):
+def process_pdf_duimp(pdf_file):
+    """Lê o PDF e estrutura os dados em DataFrame."""
     full_text = ""
     
-    # Leitura do PDF
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
             full_text += page.extract_text() + "\n"
 
-    # Dividir o texto em Itens (Adições)
-    # O padrão do cabeçalho é "ITENS DA DUIMP - {numero}"
-    # Usamos regex split para manter o delimitador e reconstruir a lista
+    # Divide o texto pelos itens (Adições)
+    # Padrão: "ITENS DA DUIMP - 00001", "ITENS DA DUIMP - 00002", etc.
     splitter = re.compile(r'(ITENS DA DUIMP - \d+)')
     parts = splitter.split(full_text)
 
-    data_rows = []
+    data = []
 
-    # Iterar sobre as partes (pula o preâmbulo do PDF)
-    # A lista parts fica: [TextoInicial, "ITENS... - 01", Conteudo01, "ITENS... - 02", Conteudo02...]
+    # O split gera uma lista onde os índices ímpares são os cabeçalhos e pares o conteúdo
     if len(parts) > 1:
         for i in range(1, len(parts), 2):
             header = parts[i]       # Ex: ITENS DA DUIMP - 00001
-            content = parts[i+1]    # O texto contendo dados do produto e impostos
+            content = parts[i+1]    # Texto do item
             
             row = {}
             
-            # --- DADOS BÁSICOS DO ITEM ---
+            # Identificação do Item
             row['Item'] = header.replace('ITENS DA DUIMP - ', '').strip()
             
-            # Partnumber
+            # Dados do Produto (Partnumber, Descrição, NCM)
             pn_match = re.search(r'CÓDIGO INTERNO \(PARTNUMBER\)\n(.+)', content)
             row['Partnumber'] = pn_match.group(1).strip() if pn_match else ""
             
-            # Descrição
             desc_match = re.search(r'DENOMINACAO DO PRODUTO\n(.+)', content)
             row['Descrição'] = desc_match.group(1).strip() if desc_match else ""
             
-            # NCM
             ncm_match = re.search(r'(\d{4}\.\d{2}\.\d{2})', content)
             row['NCM'] = ncm_match.group(1) if ncm_match else ""
             
-            # Valor Aduaneiro/Mercadoria (Aproximado pelo Valor Tot Cond Venda ou Base Calculo II)
-            # Vamos tentar pegar a Base de Cálculo do II que é o valor aduaneiro para imposto
-            base_ii_match = re.search(r'II\n.*?([\d\.]+,\d+)\s+Base de Cálculo - Específica', content, re.DOTALL)
-            if not base_ii_match:
-                 base_ii_match = re.search(r'II\n.*?([\d\.]+,\d+)\s+Base de Cálculo', content, re.DOTALL)
-            
-            row['Valor Aduaneiro (R$)'] = clean_number(base_ii_match.group(1)) if base_ii_match else 0.0
-
-            # --- EXTRAÇÃO DE TRIBUTOS ---
-            # Cortamos o texto para focar na área de impostos
+            # --- EXTRAÇÃO DE IMPOSTOS ---
+            # Cortamos o texto para focar apenas na parte de tributos para evitar ruído
             if "CALCULOS DOS TRIBUTOS - MERCADORIA" in content:
                 tax_section = content.split("CALCULOS DOS TRIBUTOS - MERCADORIA")[1]
                 
-                # Extrair II, IPI, PIS, COFINS
-                row['II a Recolher'] = extract_tax_value('II', tax_section)
-                row['IPI a Recolher'] = extract_tax_value('IPI', tax_section)
-                row['PIS a Recolher'] = extract_tax_value('PIS', tax_section)
-                row['COFINS a Recolher'] = extract_tax_value('COFINS', tax_section)
+                # Federais
+                row['II (R$)'] = extract_federal_tax('II', tax_section)
+                row['IPI (R$)'] = extract_federal_tax('IPI', tax_section)
+                row['PIS (R$)'] = extract_federal_tax('PIS', tax_section)
+                row['COFINS (R$)'] = extract_federal_tax('COFINS', tax_section)
                 
-                # Extrair ICMS
-                val_icms, base_icms = extract_icms(tax_section)
-                row['ICMS a Recolher'] = val_icms
-                row['ICMS Base Calc'] = base_icms
+                # Estadual
+                row['ICMS (R$)'] = extract_icms(tax_section)
                 
-                # Total de Impostos da Linha
-                row['Total Tributos Item'] = (row['II a Recolher'] + row['IPI a Recolher'] + 
-                                              row['PIS a Recolher'] + row['COFINS a Recolher'] + 
-                                              row['ICMS a Recolher'])
+                # Totalizador
+                row['Total Tributos (R$)'] = (
+                    row['II (R$)'] + row['IPI (R$)'] + 
+                    row['PIS (R$)'] + row['COFINS (R$)'] + 
+                    row['ICMS (R$)']
+                )
             else:
-                # Caso não ache a seção de tributos (ex: item isento ou erro de leitura)
-                row['II a Recolher'] = 0.0
-                row['IPI a Recolher'] = 0.0
-                row['PIS a Recolher'] = 0.0
-                row['COFINS a Recolher'] = 0.0
-                row['ICMS a Recolher'] = 0.0
-                row['Total Tributos Item'] = 0.0
+                # Caso não tenha seção de tributos (ex: item cancelado ou atípico)
+                row['II (R$)'] = 0.0
+                row['IPI (R$)'] = 0.0
+                row['PIS (R$)'] = 0.0
+                row['COFINS (R$)'] = 0.0
+                row['ICMS (R$)'] = 0.0
+                row['Total Tributos (R$)'] = 0.0
+                
+            data.append(row)
 
-            data_rows.append(row)
+    return pd.DataFrame(data)
 
-    return pd.DataFrame(data_rows)
+# --- INTERFACE STREAMLIT ---
 
-# --- INTERFACE DO USUÁRIO ---
+st.title("📑 Extrator DUIMP HAFELE")
+st.markdown("""
+Este app processa o PDF padrão da DUIMP e gera uma tabela com os impostos discriminados por item.
+""")
 
-st.title("📑 Extrator de Tributos DUIMP (Padrão HAFELE)")
-st.markdown("Importe o PDF da DUIMP para gerar o DataFrame com Partnumber, NCM e discriminação detalhada de impostos (II, IPI, PIS, COFINS, ICMS).")
-
-uploaded_file = st.file_uploader("Carregar arquivo PDF", type="pdf")
+uploaded_file = st.file_uploader("Carregue o PDF da DUIMP", type="pdf")
 
 if uploaded_file:
-    with st.spinner("Processando dados e calculando impostos..."):
+    with st.spinner("Lendo PDF e calculando impostos..."):
         try:
-            df = process_pdf(uploaded_file)
+            df = process_pdf_duimp(uploaded_file)
             
             if not df.empty:
-                # Formatação para exibição (apenas visual)
-                st.success("Dados extraídos com sucesso!")
+                st.success(f"Processamento concluído! {len(df)} itens encontrados.")
                 
-                # Métricas Gerais
-                total_trib = df['Total Tributos Item'].sum()
-                total_aduaneiro = df['Valor Aduaneiro (R$)'].sum()
+                # Métricas de Resumo
+                col1, col2, col3 = st.columns(3)
+                total_trib = df['Total Tributos (R$)'].sum()
+                total_ii = df['II (R$)'].sum()
+                total_ipi = df['IPI (R$)'].sum()
                 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Itens Processados", len(df))
-                c2.metric("Total Valor Aduaneiro", f"R$ {total_aduaneiro:,.2f}")
-                c3.metric("Total Tributos", f"R$ {total_trib:,.2f}")
+                col1.metric("Total Tributos (Todos)", f"R$ {total_trib:,.2f}")
+                col2.metric("Total II", f"R$ {total_ii:,.2f}")
+                col3.metric("Total IPI", f"R$ {total_ipi:,.2f}")
                 
-                # Exibir DataFrame
+                # Visualização da Tabela
                 st.dataframe(
                     df.style.format({
-                        'Valor Aduaneiro (R$)': 'R$ {:,.2f}',
-                        'II a Recolher': 'R$ {:,.2f}',
-                        'IPI a Recolher': 'R$ {:,.2f}',
-                        'PIS a Recolher': 'R$ {:,.2f}',
-                        'COFINS a Recolher': 'R$ {:,.2f}',
-                        'ICMS a Recolher': 'R$ {:,.2f}',
-                        'Total Tributos Item': 'R$ {:,.2f}',
+                        'II (R$)': '{:,.2f}',
+                        'IPI (R$)': '{:,.2f}',
+                        'PIS (R$)': '{:,.2f}',
+                        'COFINS (R$)': '{:,.2f}',
+                        'ICMS (R$)': '{:,.2f}',
+                        'Total Tributos (R$)': '{:,.2f}',
                     }),
                     use_container_width=True,
                     height=500
                 )
                 
-                # Botões de Download
-                col_d1, col_d2 = st.columns(2)
-                
-                # Excel
+                # Botão de Download Excel
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name='Tributos')
-                    # Ajuste automático de colunas (básico)
+                    # Ajuste de largura das colunas
                     worksheet = writer.sheets['Tributos']
-                    worksheet.set_column(0, len(df.columns) - 1, 15)
-                    
-                with col_d1:
-                    st.download_button(
-                        label="📥 Baixar em Excel (.xlsx)",
-                        data=buffer.getvalue(),
-                        file_name="tributos_duimp_hafele.xlsx",
-                        mime="application/vnd.ms-excel"
-                    )
+                    worksheet.set_column(0, 1, 10) # Item
+                    worksheet.set_column(1, 2, 15) # Partnumber
+                    worksheet.set_column(2, 3, 40) # Descrição
+                    worksheet.set_column(3, 10, 15) # Valores
                 
-                # CSV
-                with col_d2:
-                    csv = df.to_csv(index=False, sep=';', decimal=',')
-                    st.download_button(
-                        label="📥 Baixar em CSV",
-                        data=csv,
-                        file_name="tributos_duimp_hafele.csv",
-                        mime="text/csv"
-                    )
-
+                st.download_button(
+                    label="📥 Baixar Tabela em Excel (.xlsx)",
+                    data=buffer.getvalue(),
+                    file_name="tributos_duimp.xlsx",
+                    mime="application/vnd.ms-excel"
+                )
+                
             else:
-                st.warning("Não foi possível identificar itens no PDF. Verifique se o arquivo segue o padrão informado.")
+                st.warning("O PDF foi lido, mas nenhum item foi identificado. Verifique se é o arquivo correto.")
                 
         except Exception as e:
-            st.error(f"Ocorreu um erro no processamento: {e}")
+            st.error(f"Erro ao processar: {e}")
