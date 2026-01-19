@@ -93,9 +93,6 @@ st.markdown("""
         background-color: #DBEAFE;
         color: #1E40AF;
     }
-    .data-table {
-        font-size: 0.85rem;
-    }
     .stProgress > div > div > div > div {
         background-color: #3B82F6;
     }
@@ -111,6 +108,12 @@ st.markdown("""
         border-left: 4px solid #F59E0B;
         padding: 1rem;
         border-radius: 8px;
+        margin: 1rem 0;
+    }
+    .dataframe-container {
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #E5E7EB;
         margin: 1rem 0;
     }
 </style>
@@ -307,9 +310,12 @@ class HafelePDFParser:
     def _parse_tributos_gerais(self, text: str):
         """Parse dos tributos gerais"""
         # Localizar tabela de tributos
-        tributo_section = self._extract_section(text, 'CÁLCULOS DOS TRIBUTOS', 'RECEITA')
+        start_idx = text.find('CÁLCULOS DOS TRIBUTOS')
+        end_idx = text.find('RECEITA', start_idx)
         
-        if tributo_section:
+        if start_idx != -1:
+            tributo_section = text[start_idx:end_idx] if end_idx != -1 else text[start_idx:]
+            
             # Padrão para cada tributo
             tributo_pattern = r'([A-Z]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)'
             matches = re.findall(tributo_pattern, tributo_section)
@@ -361,8 +367,8 @@ class HafelePDFParser:
             self.documento['frete']['total'] = self._parse_valor(frete_matches[1].group(1))
         
         # Seguro
-        seguro_pattern = r'Total\s+\(R\$\)\s+([\d\.,]+).*?SEGURO'
-        seguro_match = re.search(seguro_pattern, text, re.DOTALL)
+        seguro_pattern = r'Total\s+\(R\$\)\s+([\d\.,]+)'
+        seguro_match = re.search(seguro_pattern, text)
         if seguro_match:
             self.documento['seguro']['total'] = self._parse_valor(seguro_match.group(1))
     
@@ -440,12 +446,6 @@ class HafelePDFParser:
         if codigo_match:
             self.current_item['codigo_interno'] = codigo_match.group(1).strip()
         
-        # Fabricante
-        fabricante_pattern = r'Conhecido\s+([^\n]+)'
-        fabricante_match = re.search(fabricante_pattern, text)
-        if fabricante_match:
-            self.current_item['fabricante'] = fabricante_match.group(1).strip()
-        
         # Quantidade
         qtd_pattern = r'Qtde Unid. Comercial\s+([\d\.,]+)'
         qtd_match = re.search(qtd_pattern, text)
@@ -473,11 +473,16 @@ class HafelePDFParser:
     def _parse_item_values(self, text: str):
         """Parse dos valores do item"""
         # Valores de embarque e aduaneiro
-        valores_pattern = r'Local Embarque \(R\$\)\s+([\d\.,]+).*?Local Aduaneiro \(R\$\)\s+([\d\.,]+)'
-        valores_match = re.search(valores_pattern, text, re.DOTALL)
-        if valores_match:
-            self.current_item['valor_local_embarque'] = self._parse_valor(valores_match.group(1))
-            self.current_item['valor_local_aduanero'] = self._parse_valor(valores_match.group(2))
+        valores_pattern = r'Local Embarque \(R\$\)\s+([\d\.,]+)'
+        valor_emb_match = re.search(valores_pattern, text)
+        if valor_emb_match:
+            self.current_item['valor_local_embarque'] = self._parse_valor(valor_emb_match.group(1))
+        
+        # Valor aduaneiro
+        aduaneiro_pattern = r'Local Aduaneiro \(R\$\)\s+([\d\.,]+)'
+        aduaneiro_match = re.search(aduaneiro_pattern, text)
+        if aduaneiro_match:
+            self.current_item['valor_local_aduanero'] = self._parse_valor(aduaneiro_match.group(1))
         
         # Frete internacional
         frete_pattern = r'Frete Internac. \(R\$\)\s+([\d\.,]+)'
@@ -494,44 +499,84 @@ class HafelePDFParser:
     def _parse_item_taxes(self, text: str):
         """Parse dos tributos do item"""
         # II
-        ii_pattern = r'II.*?Base de Cálculo \(R\$\)\s+([\d\.,]+).*?% Alíquota\s+([\d\.,]+).*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        ii_match = re.search(ii_pattern, text, re.DOTALL)
-        if ii_match:
-            self.current_item['ii_base_calculo'] = self._parse_valor(ii_match.group(1))
-            self.current_item['ii_aliquota'] = self._parse_valor(ii_match.group(2))
-            self.current_item['ii_valor_devido'] = self._parse_valor(ii_match.group(3))
+        ii_base_pattern = r'II.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
+        ii_base_match = re.search(ii_base_pattern, text, re.DOTALL)
+        if ii_base_match:
+            self.current_item['ii_base_calculo'] = self._parse_valor(ii_base_match.group(1))
+        
+        ii_aliquota_pattern = r'II.*?% Alíquota\s+([\d\.,]+)'
+        ii_aliquota_match = re.search(ii_aliquota_pattern, text, re.DOTALL)
+        if ii_aliquota_match:
+            self.current_item['ii_aliquota'] = self._parse_valor(ii_aliquota_match.group(1))
+        
+        ii_devido_pattern = r'II.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
+        ii_devido_match = re.search(ii_devido_pattern, text, re.DOTALL)
+        if ii_devido_match:
+            self.current_item['ii_valor_devido'] = self._parse_valor(ii_devido_match.group(1))
         
         # IPI
-        ipi_pattern = r'IPI.*?Base de Cálculo \(R\$\)\s+([\d\.,]+).*?% Alíquota\s+([\d\.,]+).*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        ipi_match = re.search(ipi_pattern, text, re.DOTALL)
-        if ipi_match:
-            self.current_item['ipi_base_calculo'] = self._parse_valor(ipi_match.group(1))
-            self.current_item['ipi_aliquota'] = self._parse_valor(ipi_match.group(2))
-            self.current_item['ipi_valor_devido'] = self._parse_valor(ipi_match.group(3))
+        ipi_base_pattern = r'IPI.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
+        ipi_base_match = re.search(ipi_base_pattern, text, re.DOTALL)
+        if ipi_base_match:
+            self.current_item['ipi_base_calculo'] = self._parse_valor(ipi_base_match.group(1))
+        
+        ipi_aliquota_pattern = r'IPI.*?% Alíquota\s+([\d\.,]+)'
+        ipi_aliquota_match = re.search(ipi_aliquota_pattern, text, re.DOTALL)
+        if ipi_aliquota_match:
+            self.current_item['ipi_aliquota'] = self._parse_valor(ipi_aliquota_match.group(1))
+        
+        ipi_devido_pattern = r'IPI.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
+        ipi_devido_match = re.search(ipi_devido_pattern, text, re.DOTALL)
+        if ipi_devido_match:
+            self.current_item['ipi_valor_devido'] = self._parse_valor(ipi_devido_match.group(1))
         
         # PIS
-        pis_pattern = r'PIS.*?Base de Cálculo \(R\$\)\s+([\d\.,]+).*?% Alíquota\s+([\d\.,]+).*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        pis_match = re.search(pis_pattern, text, re.DOTALL)
-        if pis_match:
-            self.current_item['pis_base_calculo'] = self._parse_valor(pis_match.group(1))
-            self.current_item['pis_aliquota'] = self._parse_valor(pis_match.group(2))
-            self.current_item['pis_valor_devido'] = self._parse_valor(pis_match.group(3))
+        pis_base_pattern = r'PIS.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
+        pis_base_match = re.search(pis_base_pattern, text, re.DOTALL)
+        if pis_base_match:
+            self.current_item['pis_base_calculo'] = self._parse_valor(pis_base_match.group(1))
+        
+        pis_aliquota_pattern = r'PIS.*?% Alíquota\s+([\d\.,]+)'
+        pis_aliquota_match = re.search(pis_aliquota_pattern, text, re.DOTALL)
+        if pis_aliquota_match:
+            self.current_item['pis_aliquota'] = self._parse_valor(pis_aliquota_match.group(1))
+        
+        pis_devido_pattern = r'PIS.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
+        pis_devido_match = re.search(pis_devido_pattern, text, re.DOTALL)
+        if pis_devido_match:
+            self.current_item['pis_valor_devido'] = self._parse_valor(pis_devido_match.group(1))
         
         # COFINS
-        cofins_pattern = r'COFINS.*?Base de Cálculo \(R\$\)\s+([\d\.,]+).*?% Alíquota\s+([\d\.,]+).*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        cofins_match = re.search(cofins_pattern, text, re.DOTALL)
-        if cofins_match:
-            self.current_item['cofins_base_calculo'] = self._parse_valor(cofins_match.group(1))
-            self.current_item['cofins_aliquota'] = self._parse_valor(cofins_match.group(2))
-            self.current_item['cofins_valor_devido'] = self._parse_valor(cofins_match.group(3))
+        cofins_base_pattern = r'COFINS.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
+        cofins_base_match = re.search(cofins_base_pattern, text, re.DOTALL)
+        if cofins_base_match:
+            self.current_item['cofins_base_calculo'] = self._parse_valor(cofins_base_match.group(1))
+        
+        cofins_aliquota_pattern = r'COFINS.*?% Alíquota\s+([\d\.,]+)'
+        cofins_aliquota_match = re.search(cofins_aliquota_pattern, text, re.DOTALL)
+        if cofins_aliquota_match:
+            self.current_item['cofins_aliquota'] = self._parse_valor(cofins_aliquota_match.group(1))
+        
+        cofins_devido_pattern = r'COFINS.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
+        cofins_devido_match = re.search(cofins_devido_pattern, text, re.DOTALL)
+        if cofins_devido_match:
+            self.current_item['cofins_valor_devido'] = self._parse_valor(cofins_devido_match.group(1))
         
         # ICMS
-        icms_pattern = r'ICMS.*?Regime de Tributacao\s+([^\n]+).*?Base de Cálculo\s+([\d\.,]+).*?Valor Devido\s+([\d\.,]+)'
-        icms_match = re.search(icms_pattern, text, re.DOTALL)
-        if icms_match:
-            self.current_item['icms_regime'] = icms_match.group(1).strip()
-            self.current_item['icms_base_calculo'] = self._parse_valor(icms_match.group(2))
-            self.current_item['icms_valor_devido'] = self._parse_valor(icms_match.group(3))
+        icms_regime_pattern = r'ICMS.*?Regime de Tributacao\s+([^\n]+)'
+        icms_regime_match = re.search(icms_regime_pattern, text, re.DOTALL)
+        if icms_regime_match:
+            self.current_item['icms_regime'] = icms_regime_match.group(1).strip()
+        
+        icms_base_pattern = r'ICMS.*?Base de Cálculo\s+([\d\.,]+)'
+        icms_base_match = re.search(icms_base_pattern, text, re.DOTALL)
+        if icms_base_match:
+            self.current_item['icms_base_calculo'] = self._parse_valor(icms_base_match.group(1))
+        
+        icms_devido_pattern = r'ICMS.*?Valor Devido\s+([\d\.,]+)'
+        icms_devido_match = re.search(icms_devido_pattern, text, re.DOTALL)
+        if icms_devido_match:
+            self.current_item['icms_valor_devido'] = self._parse_valor(icms_devido_match.group(1))
     
     def _finalize_current_item(self):
         """Finaliza o item atual e adiciona à lista"""
@@ -592,7 +637,9 @@ class HafelePDFParser:
         
         totais['valor_total_com_impostos'] = (
             totais['valor_total_mercadoria'] + 
-            totais['total_impostos']
+            totais['total_impostos'] +
+            totais['frete_total'] +
+            totais['seguro_total']
         )
         
         self.documento['totais'] = totais
@@ -608,18 +655,6 @@ class HafelePDFParser:
             return float(valor_limpo)
         except:
             return 0.0
-    
-    def _extract_section(self, text: str, start_marker: str, end_marker: str) -> str:
-        """Extrai uma seção específica do texto"""
-        start_idx = text.find(start_marker)
-        if start_idx == -1:
-            return ""
-        
-        end_idx = text.find(end_marker, start_idx)
-        if end_idx == -1:
-            return text[start_idx:]
-        
-        return text[start_idx:end_idx]
 
 class FinancialAnalyzer:
     """Analisador financeiro completo"""
@@ -718,12 +753,33 @@ class FinancialAnalyzer:
             }
         
         # Top itens
-        if self.itens_df is not None:
-            self.analises['top_itens_valor'] = self.itens_df.nlargest(10, 'Valor Total (R$)')
-            self.analises['top_itens_impostos'] = self.itens_df.nlargest(10, 'Total Impostos (R$)')
+        if self.itens_df is not None and not self.itens_df.empty:
+            if 'Valor Total (R$)' in self.itens_df.columns:
+                self.analises['top_itens_valor'] = self.itens_df.nlargest(10, 'Valor Total (R$)')
+            if 'Total Impostos (R$)' in self.itens_df.columns:
+                self.analises['top_itens_impostos'] = self.itens_df.nlargest(10, 'Total Impostos (R$)')
 
 class VisualizadorCompleto:
     """Visualizador completo dos dados"""
+    
+    @staticmethod
+    def format_dataframe(df, currency_cols=None, percent_cols=None):
+        """Formata DataFrame sem usar background_gradient"""
+        if currency_cols is None:
+            currency_cols = []
+        if percent_cols is None:
+            percent_cols = []
+        
+        # Formatação básica
+        for col in currency_cols:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: f'R$ {x:,.2f}' if pd.notnull(x) else 'R$ 0,00')
+        
+        for col in percent_cols:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: f'{x:.2f}%' if pd.notnull(x) else '0,00%')
+        
+        return df
     
     @staticmethod
     def criar_dashboard_resumo(analyser: FinancialAnalyzer):
@@ -743,12 +799,13 @@ class VisualizadorCompleto:
             """, unsafe_allow_html=True)
         
         with col2:
+            percent_impostos = (totais.get('total_impostos', 0) / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0
             st.markdown(f"""
             <div class="section-card">
                 <div class="metric-value">R$ {totais.get('total_impostos', 0):,.2f}</div>
                 <div class="metric-label">Total Impostos</div>
                 <span class="badge badge-warning">
-                    {(totais.get('total_impostos', 0) / totais.get('valor_total_mercadoria', 1) * 100):.1f}%
+                    {percent_impostos:.1f}%
                 </span>
             </div>
             """, unsafe_allow_html=True)
@@ -763,12 +820,13 @@ class VisualizadorCompleto:
             """, unsafe_allow_html=True)
         
         with col4:
+            custo_kg = (totais.get('valor_total_com_impostos', 0) / totais.get('peso_total', 1)) if totais.get('peso_total', 0) > 0 else 0
             st.markdown(f"""
             <div class="section-card">
                 <div class="metric-value">{totais.get('peso_total', 0):,.1f}</div>
                 <div class="metric-label">Peso Total (kg)</div>
                 <span class="badge badge-info">
-                    R$ {totais.get('valor_total_com_impostos', 0) / totais.get('peso_total', 1) if totais.get('peso_total', 0) > 0 else 0:,.2f}/kg
+                    R$ {custo_kg:,.2f}/kg
                 </span>
             </div>
             """, unsafe_allow_html=True)
@@ -787,34 +845,47 @@ class VisualizadorCompleto:
                 ('PIS', totais.get('pis_total', 0)),
                 ('COFINS', totais.get('cofins_total', 0))
             ]:
-                percentual = (valor / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0
+                percent_merc = (valor / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0
+                percent_impostos_total = (valor / totais.get('total_impostos', 1) * 100) if totais.get('total_impostos', 0) > 0 else 0
                 impostos_data.append({
                     'Imposto': tributo,
-                    'Valor (R$)': valor,
-                    '% sobre Mercadoria': percentual,
-                    '% sobre Total Impostos': (valor / totais.get('total_impostos', 1) * 100) if totais.get('total_impostos', 0) > 0 else 0
+                    'Valor (R$)': f'R$ {valor:,.2f}',
+                    '% sobre Mercadoria': f'{percent_merc:.2f}%',
+                    '% sobre Total Impostos': f'{percent_impostos_total:.2f}%'
                 })
             
             impostos_df = pd.DataFrame(impostos_data)
             
+            # Estilizar manualmente
+            st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
             st.dataframe(
-                impostos_df.style.format({
-                    'Valor (R$)': 'R$ {:,.2f}',
-                    '% sobre Mercadoria': '{:.2f}%',
-                    '% sobre Total Impostos': '{:.2f}%'
-                }).background_gradient(subset=['Valor (R$)'], cmap='YlOrRd'),
-                use_container_width=True
+                impostos_df,
+                use_container_width=True,
+                hide_index=True
             )
+            st.markdown('</div>', unsafe_allow_html=True)
         
         with col2:
             # Gráfico de impostos
+            impostos_chart_data = {
+                'Imposto': ['II', 'IPI', 'PIS', 'COFINS'],
+                'Valor': [
+                    totais.get('ii_total', 0),
+                    totais.get('ipi_total', 0),
+                    totais.get('pis_total', 0),
+                    totais.get('cofins_total', 0)
+                ]
+            }
+            
+            impostos_chart_df = pd.DataFrame(impostos_chart_data)
+            
             fig = px.pie(
-                impostos_df,
-                values='Valor (R$)',
+                impostos_chart_df,
+                values='Valor',
                 names='Imposto',
                 title='Distribuição dos Impostos',
                 hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Set3
+                color_discrete_sequence=['#3B82F6', '#10B981', '#F59E0B', '#EF4444']
             )
             fig.update_traces(textposition='inside', textinfo='percent+label')
             fig.update_layout(
@@ -826,40 +897,54 @@ class VisualizadorCompleto:
         # Análises por NCM
         st.markdown('<h3 class="sub-header">🏷️ Análise por NCM</h3>', unsafe_allow_html=True)
         
-        if analyser.itens_df is not None:
-            ncm_analysis = analyser.itens_df.groupby('NCM').agg({
-                'Quantidade': 'sum',
-                'Valor Total (R$)': 'sum',
-                'Total Impostos (R$)': 'sum'
-            }).reset_index()
-            
-            ncm_analysis['% Valor'] = (ncm_analysis['Valor Total (R$)'] / ncm_analysis['Valor Total (R$)'].sum() * 100)
-            ncm_analysis = ncm_analysis.sort_values('Valor Total (R$)', ascending=False)
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.dataframe(
-                    ncm_analysis.style.format({
-                        'Quantidade': '{:,.2f}',
-                        'Valor Total (R$)': 'R$ {:,.2f}',
-                        'Total Impostos (R$)': 'R$ {:,.2f}',
-                        '% Valor': '{:.2f}%'
-                    }).bar(subset=['Valor Total (R$)'], color='#3B82F6'),
-                    use_container_width=True
-                )
-            
-            with col2:
-                fig = px.bar(
-                    ncm_analysis.head(10),
-                    x='NCM',
-                    y='Valor Total (R$)',
-                    title='Top 10 NCMs por Valor',
-                    color='Valor Total (R$)',
-                    color_continuous_scale='Blues'
-                )
-                fig.update_layout(height=400, xaxis_tickangle=-45)
-                st.plotly_chart(fig, use_container_width=True)
+        if analyser.itens_df is not None and not analyser.itens_df.empty:
+            # Garantir que as colunas existem
+            required_cols = ['NCM', 'Quantidade', 'Valor Total (R$)', 'Total Impostos (R$)']
+            if all(col in analyser.itens_df.columns for col in required_cols):
+                ncm_analysis = analyser.itens_df.groupby('NCM').agg({
+                    'Quantidade': 'sum',
+                    'Valor Total (R$)': 'sum',
+                    'Total Impostos (R$)': 'sum'
+                }).reset_index()
+                
+                total_valor = ncm_analysis['Valor Total (R$)'].sum()
+                if total_valor > 0:
+                    ncm_analysis['% Valor'] = (ncm_analysis['Valor Total (R$)'] / total_valor * 100)
+                else:
+                    ncm_analysis['% Valor'] = 0
+                
+                ncm_analysis = ncm_analysis.sort_values('Valor Total (R$)', ascending=False)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Formatar para exibição
+                    display_df = ncm_analysis.copy()
+                    display_df['Quantidade'] = display_df['Quantidade'].apply(lambda x: f'{x:,.2f}')
+                    display_df['Valor Total (R$)'] = display_df['Valor Total (R$)'].apply(lambda x: f'R$ {x:,.2f}')
+                    display_df['Total Impostos (R$)'] = display_df['Total Impostos (R$)'].apply(lambda x: f'R$ {x:,.2f}')
+                    display_df['% Valor'] = display_df['% Valor'].apply(lambda x: f'{x:.2f}%')
+                    
+                    st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True
+                    )
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with col2:
+                    if len(ncm_analysis) > 0:
+                        top_ncm = ncm_analysis.head(10)
+                        fig = px.bar(
+                            top_ncm,
+                            x='NCM',
+                            y='Valor Total (R$)',
+                            title='Top 10 NCMs por Valor',
+                            color='Valor Total (R$)',
+                            color_continuous_scale='Blues'
+                        )
+                        fig.update_layout(height=400, xaxis_tickangle=-45)
+                        st.plotly_chart(fig, use_container_width=True)
 
 def main():
     """Função principal"""
@@ -959,7 +1044,10 @@ def main():
                 status_text.markdown("### ✅ **Processamento concluído com sucesso!**")
                 
                 # Limpar arquivo temporário
-                os.unlink(tmp_path)
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
             
             # Informações do processamento
             st.markdown(f"""
@@ -977,52 +1065,60 @@ def main():
                 st.markdown('<h2 class="sub-header">📈 Dashboard Resumo</h2>', unsafe_allow_html=True)
                 VisualizadorCompleto.criar_dashboard_resumo(analyser)
             
-            if "Lista Completa de Itens" in modules:
+            if "Lista Completa de Itens" in modules and analyser.itens_df is not None:
                 st.markdown('<h2 class="sub-header">📦 Lista Completa de Itens</h2>', unsafe_allow_html=True)
                 
                 # Filtros
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    search_term = st.text_input("🔍 Buscar:", "")
+                    search_term = st.text_input("🔍 Buscar:", "", key="search_items")
                 with col2:
-                    min_valor = st.number_input("Valor mínimo (R$):", min_value=0.0, value=0.0, step=1000.0)
+                    min_valor = st.number_input("Valor mínimo (R$):", min_value=0.0, value=0.0, step=1000.0, key="min_valor")
                 with col3:
-                    ncm_filter = st.text_input("Filtrar por NCM:", "")
+                    ncm_filter = st.text_input("Filtrar por NCM:", "", key="ncm_filter")
                 
                 # Aplicar filtros
                 filtered_df = analyser.itens_df.copy()
                 if search_term:
                     filtered_df = filtered_df[
-                        filtered_df['Produto'].str.contains(search_term, case=False, na=False) |
-                        filtered_df['Código Interno'].astype(str).str.contains(search_term, case=False, na=False)
+                        filtered_df['Produto'].astype(str).str.contains(search_term, case=False, na=False) |
+                        filtered_df['Código Interno'].astype(str).str.contains(search_term, case=False, na=False) |
+                        filtered_df['Código'].astype(str).str.contains(search_term, case=False, na=False)
                     ]
                 
-                if min_valor > 0:
+                if min_valor > 0 and 'Valor Total (R$)' in filtered_df.columns:
                     filtered_df = filtered_df[filtered_df['Valor Total (R$)'] >= min_valor]
                 
-                if ncm_filter:
+                if ncm_filter and 'NCM' in filtered_df.columns:
                     filtered_df = filtered_df[filtered_df['NCM'].astype(str).str.contains(ncm_filter)]
                 
                 # Exibir tabela
-                st.dataframe(
-                    filtered_df.style.format({
-                        'Quantidade': '{:,.2f}',
-                        'Peso (kg)': '{:,.2f}',
-                        'Valor Unit. (R$)': 'R$ {:,.2f}',
-                        'Valor Total (R$)': 'R$ {:,.2f}',
-                        'Frete (R$)': 'R$ {:,.2f}',
-                        'Seguro (R$)': 'R$ {:,.2f}',
-                        'II (R$)': 'R$ {:,.2f}',
-                        'IPI (R$)': 'R$ {:,.2f}',
-                        'PIS (R$)': 'R$ {:,.2f}',
-                        'COFINS (R$)': 'R$ {:,.2f}',
-                        'Total Impostos (R$)': 'R$ {:,.2f}',
-                        'Valor c/ Impostos (R$)': 'R$ {:,.2f}',
-                        'Custo Unitário (R$)': 'R$ {:,.2f}'
-                    }).background_gradient(subset=['Total Impostos (R$)'], cmap='YlOrRd'),
-                    use_container_width=True,
-                    height=600
-                )
+                if not filtered_df.empty:
+                    # Formatar para exibição
+                    display_df = filtered_df.copy()
+                    
+                    # Formatar colunas numéricas
+                    format_cols = ['Quantidade', 'Peso (kg)', 'Valor Unit. (R$)', 'Valor Total (R$)',
+                                 'Frete (R$)', 'Seguro (R$)', 'II (R$)', 'IPI (R$)',
+                                 'PIS (R$)', 'COFINS (R$)', 'Total Impostos (R$)',
+                                 'Valor c/ Impostos (R$)', 'Custo Unitário (R$)']
+                    
+                    for col in format_cols:
+                        if col in display_df.columns:
+                            if 'Unitário' in col or 'Unit.' in col:
+                                display_df[col] = display_df[col].apply(lambda x: f'R$ {x:,.4f}' if pd.notnull(x) else 'R$ 0,0000')
+                            else:
+                                display_df[col] = display_df[col].apply(lambda x: f'R$ {x:,.2f}' if pd.notnull(x) else 'R$ 0,00')
+                    
+                    st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        height=600
+                    )
+                    st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.info("Nenhum item encontrado com os filtros aplicados.")
             
             if "Exportação Completa" in modules:
                 st.markdown('<h2 class="sub-header">💾 Exportação de Dados</h2>', unsafe_allow_html=True)
@@ -1031,25 +1127,27 @@ def main():
                 
                 with col1:
                     # Exportar itens CSV
-                    csv_itens = analyser.itens_df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        label="📥 Itens (CSV)",
-                        data=csv_itens,
-                        file_name="itens_completos.csv",
-                        mime="text/csv",
-                        help="Lista completa de itens"
-                    )
+                    if analyser.itens_df is not None:
+                        csv_itens = analyser.itens_df.to_csv(index=False, encoding='utf-8-sig')
+                        st.download_button(
+                            label="📥 Itens (CSV)",
+                            data=csv_itens,
+                            file_name="itens_completos.csv",
+                            mime="text/csv",
+                            help="Lista completa de itens"
+                        )
                 
                 with col2:
                     # Exportar totais CSV
-                    csv_totais = analyser.totais_df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        label="📥 Totais (CSV)",
-                        data=csv_totais,
-                        file_name="totais.csv",
-                        mime="text/csv",
-                        help="Resumo de totais"
-                    )
+                    if analyser.totais_df is not None:
+                        csv_totais = analyser.totais_df.to_csv(index=False, encoding='utf-8-sig')
+                        st.download_button(
+                            label="📥 Totais (CSV)",
+                            data=csv_totais,
+                            file_name="totais.csv",
+                            mime="text/csv",
+                            help="Resumo de totais"
+                        )
                 
                 with col3:
                     # Exportar JSON completo
@@ -1066,25 +1164,35 @@ def main():
                     # Exportar Excel
                     import io
                     output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        analyser.itens_df.to_excel(writer, sheet_name='Itens', index=False)
-                        analyser.totais_df.to_excel(writer, sheet_name='Totais', index=False)
-                        
-                        # Adicionar análise por NCM
-                        ncm_df = analyser.itens_df.groupby('NCM').agg({
-                            'Quantidade': 'sum',
-                            'Valor Total (R$)': 'sum',
-                            'Total Impostos (R$)': 'sum'
-                        }).reset_index()
-                        ncm_df.to_excel(writer, sheet_name='Por NCM', index=False)
                     
-                    st.download_button(
-                        label="📊 Excel Completo",
-                        data=output.getvalue(),
-                        file_name="analise_completa.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        help="Relatório completo em Excel"
-                    )
+                    try:
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            if analyser.itens_df is not None:
+                                analyser.itens_df.to_excel(writer, sheet_name='Itens', index=False)
+                            
+                            if analyser.totais_df is not None:
+                                analyser.totais_df.to_excel(writer, sheet_name='Totais', index=False)
+                            
+                            # Adicionar análise por NCM
+                            if analyser.itens_df is not None and not analyser.itens_df.empty:
+                                required_cols = ['NCM', 'Quantidade', 'Valor Total (R$)', 'Total Impostos (R$)']
+                                if all(col in analyser.itens_df.columns for col in required_cols):
+                                    ncm_df = analyser.itens_df.groupby('NCM').agg({
+                                        'Quantidade': 'sum',
+                                        'Valor Total (R$)': 'sum',
+                                        'Total Impostos (R$)': 'sum'
+                                    }).reset_index()
+                                    ncm_df.to_excel(writer, sheet_name='Por NCM', index=False)
+                        
+                        st.download_button(
+                            label="📊 Excel Completo",
+                            data=output.getvalue(),
+                            file_name="analise_completa.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            help="Relatório completo em Excel"
+                        )
+                    except Exception as e:
+                        st.error(f"Erro ao criar Excel: {str(e)}")
             
             if show_debug:
                 st.markdown('<h2 class="sub-header">🔧 Informações de Debug</h2>', unsafe_allow_html=True)
@@ -1098,6 +1206,8 @@ def main():
                     st.metric("Total de Itens", len(documento['itens']))
                     st.metric("Total de Páginas", len(parser.item_buffer))
                     st.metric("Tamanho do JSON", f"{len(json.dumps(documento)) / 1024:.1f} KB")
+                    if analyser.itens_df is not None:
+                        st.metric("Colunas no DataFrame", len(analyser.itens_df.columns))
                 
                 with tab3:
                     st.code("""
@@ -1110,7 +1220,7 @@ def main():
         
         except Exception as e:
             st.error(f"❌ Erro no processamento: {str(e)}")
-            st.exception(e)
+            st.code(str(e), language='python')
     
     else:
         # Tela inicial
