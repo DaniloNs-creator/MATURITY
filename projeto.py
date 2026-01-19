@@ -3,237 +3,281 @@ import pdfplumber
 import pandas as pd
 import re
 import io
-from typing import Optional, List, Dict
+import time
+from typing import List, Dict, Any
 
 # ==============================================================================
-# CONFIGURAÇÃO DA PÁGINA
+# CONFIGURAÇÃO GERAL DA APLICAÇÃO
 # ==============================================================================
 st.set_page_config(
-    page_title="Extrator DUIMP Pro",
-    page_icon="📦",
-    layout="wide"
+    page_title="Processador DUIMP Enterprise",
+    page_icon="🏗️",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
+# CSS Customizado para visual mais profissional
+st.markdown("""
+    <style>
+    .stProgress > div > div > div > div {
+        background-color: #007bff;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 24px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # ==============================================================================
-# LÓGICA DE NEGÓCIO (BACKEND)
+# NÚCLEO DE PROCESSAMENTO (ENGINE)
 # ==============================================================================
 
-class DuimpParser:
+class DuimpExtractorEngine:
     """
-    Classe especialista em extrair dados de PDFs de Conferência DUIMP.
-    Usa padrões de Regex para identificar campos chave independente da página.
+    Motor de processamento robusto para Declarações Únicas de Importação (DUIMP).
+    Utiliza estratégia de 'Text Stream' para mitigar quebras de página em itens longos.
     """
-    
+
     def __init__(self):
-        # Regex compilado para performance e robustez
-        # Captura: "Item 1", "Código Produto: 123", "Descrição..."
-        self.patterns = {
-            'novo_item': re.compile(r'N[ºo°]\s*Adição\s*(\d+).*?Item\s*(\d+)', re.IGNORECASE),
-            'codigo': re.compile(r'Código\s*(?:do)?\s*Produto\s*[:\s]*([\w\.-]+)', re.IGNORECASE),
-            # Captura a descrição até encontrar uma palavra chave de parada (ex: NCM, Quantidade) ou quebra de linha dupla
-            'descricao': re.compile(r'Descrição\s*Complementar\s*(.*?)(?=\n\s*(?:NCM|Unidade|Qtd)|$)', re.IGNORECASE | re.DOTALL),
+        # Padrões Regex Compilados (Otimizados para Siscomex/DUIMP)
+        self.PATTERNS = {
+            # Captura início de um bloco de item: "Nº Adição 1 Nº do Item 1"
+            'ITEM_START': re.compile(r'N[ºo°]\s*Adição\s*(\d+)\s*N[ºo°]\s*do\s*Item\s*(\d+)', re.IGNORECASE),
             
-            # Impostos: Busca a sigla seguida de "Valor a Recolher" e o número
-            'ii': re.compile(r'\bII\b.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
-            'ipi': re.compile(r'\bIPI\b.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
-            'pis': re.compile(r'\bPIS\b.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
-            'cofins': re.compile(r'\bCOFINS\b.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
+            # Captura Código do Produto (Part Number)
+            'PROD_CODE': re.compile(r'Código\s*(?:do)?\s*Produto\s*[:\s]*([0-9\.]+)', re.IGNORECASE),
+            
+            # Captura Descrição (busca texto entre a label e a próxima label comum como NCM ou Unidade)
+            'DESC_COMPLETA': re.compile(r'Descrição\s*Complementar\s*\n(.*?)(?=\n\s*(?:NCM|Unidade|Condição|País)|$)', re.IGNORECASE | re.DOTALL),
+            
+            # Captura valores monetários de impostos (considerando formatação R$ 1.000,00)
+            'TAX_II': re.compile(r'II\s*.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
+            'TAX_IPI': re.compile(r'IPI\s*.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
+            'TAX_PIS': re.compile(r'PIS\s*.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
+            'TAX_COFINS': re.compile(r'COFINS\s*.*?Valor\s*a\s*Recolher\s*([\d\.,]+)', re.IGNORECASE | re.DOTALL),
         }
 
-    def _clean_currency(self, value_str: Optional[str]) -> float:
-        """Converte string '1.234,56' para float 1234.56 de forma segura."""
+    @staticmethod
+    def _parse_currency(value_str: str) -> float:
+        """Converte string monetária brasileira para float de forma segura."""
         if not value_str:
             return 0.0
         try:
-            # Remove pontos de milhar e troca vírgula decimal por ponto
-            clean = value_str.replace('.', '').replace(',', '.')
-            return float(clean)
-        except ValueError:
+            # Remove caracteres invisíveis e espaços
+            clean_str = value_str.strip()
+            # Remove separador de milhar e substitui decimal
+            clean_str = clean_str.replace('.', '').replace(',', '.')
+            return float(clean_str)
+        except (ValueError, AttributeError):
             return 0.0
 
-    def process_file(self, file_buffer) -> pd.DataFrame:
-        """Lê o buffer do arquivo e retorna DataFrame estruturado."""
-        extracted_data = []
-        
-        with pdfplumber.open(file_buffer) as pdf:
-            total_pages = len(pdf.pages)
-            
-            # Variáveis de estado para rastrear o item atual enquanto percorre as páginas
-            current_item: Dict = {}
-            
-            # Barra de progresso na UI
+    def extract_full_text(self, pdf_file) -> str:
+        """
+        Extrai texto de todas as páginas e concatena com marcadores.
+        Isso é crucial para itens que quebram de uma página para outra.
+        """
+        full_text = []
+        with pdfplumber.open(pdf_file) as pdf:
+            total = len(pdf.pages)
             progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            for i, page in enumerate(pdf.pages):
-                # Atualiza UI
-                progress = int((i + 1) / total_pages * 100)
-                progress_bar.progress(progress)
-                status_text.text(f"Processando página {i + 1} de {total_pages}...")
-
-                text = page.extract_text()
-                if not text:
-                    continue
-
-                # Divide o texto da página em blocos baseados no cabeçalho do item
-                # Isso evita que o imposto do Item 2 seja atribuído ao Item 1 se estiverem na mesma página
-                
-                # Encontra todas as ocorrências de início de item
-                matches = list(self.patterns['novo_item'].finditer(text))
-                
-                # Se não tem início de item, pode ser continuação da página anterior (ex: impostos na pág seguinte)
-                if not matches and current_item:
-                    self._extract_fields(text, current_item)
-                
-                # Se tem itens novos
-                else:
-                    prev_idx = 0
-                    for idx, match in enumerate(matches):
-                        # Se já existe um item sendo montado, salva ele antes de começar o novo
-                        if current_item:
-                            extracted_data.append(current_item)
-                        
-                        # Inicia novo item
-                        adicao, item_num = match.groups()
-                        current_item = {
-                            'Adição': int(adicao),
-                            'Item': int(item_num),
-                            'Código': None,
-                            'Descrição': None,
-                            'II': 0.0, 'IPI': 0.0, 'PIS': 0.0, 'COFINS': 0.0,
-                            'Origem': f'Pág {i+1}'
-                        }
-
-                        # Define o escopo do texto para este item (do match atual até o próximo match ou fim da pag)
-                        start_pos = match.start()
-                        end_pos = matches[idx+1].start() if idx + 1 < len(matches) else len(text)
-                        item_text_block = text[start_pos:end_pos]
-                        
-                        self._extract_fields(item_text_block, current_item)
-
-            # Adiciona o último item encontrado
-            if current_item:
-                extracted_data.append(current_item)
-                
-            progress_bar.empty()
-            status_text.empty()
-
-        df = pd.DataFrame(extracted_data)
-        if not df.empty:
-            # Reorganiza colunas e cria totais
-            cols = ['Adição', 'Item', 'Código', 'Descrição', 'II', 'IPI', 'PIS', 'COFINS']
-            df = df[cols]
-            df['Total Impostos'] = df['II'] + df['IPI'] + df['PIS'] + df['COFINS']
+            status = st.empty()
             
-        return df
+            for i, page in enumerate(pdf.pages):
+                # Feedback visual para o usuário
+                if i % 10 == 0:
+                    prog = int((i / total) * 100)
+                    progress_bar.progress(prog)
+                    status.text(f"Lendo página {i+1} de {total}...")
+                
+                text = page.extract_text()
+                if text:
+                    full_text.append(text)
+            
+            progress_bar.progress(100)
+            status.empty()
+            
+        return "\n".join(full_text)
 
-    def _extract_fields(self, text_block: str, item_dict: Dict):
-        """Método auxiliar para preencher o dicionário do item com regex."""
-        # Código
-        if not item_dict.get('Código'):
-            m_cod = self.patterns['codigo'].search(text_block)
-            if m_cod: item_dict['Código'] = m_cod.group(1)
+    def process_data(self, raw_text: str) -> pd.DataFrame:
+        """Processa o texto bruto concatenado e estrutura os dados."""
         
-        # Descrição (se ainda não pegou, ou para concatenar se quebrou página - aqui simplificado)
-        if not item_dict.get('Descrição'):
-            m_desc = self.patterns['descricao'].search(text_block)
-            if m_desc: item_dict['Descrição'] = m_desc.group(1).replace('\n', ' ').strip()
+        # Divide o texto bruto em blocos baseados no padrão de início de item
+        # O split cria uma lista onde cada elemento é um bloco de texto de um item
+        # Usamos regex split mantendo os grupos de captura (Adição e Item)
+        
+        # Adiciona um marcador especial para facilitar o split
+        text_with_markers = self.PATTERNS['ITEM_START'].sub(r'__ITEM_START__\1|\2\n', raw_text)
+        blocks = text_with_markers.split('__ITEM_START__')
+        
+        extracted_items = []
+        
+        # Pula o primeiro bloco se for cabeçalho geral (antes do item 1)
+        for block in blocks[1:]:
+            try:
+                # O bloco começa com "Adição|Item\nResto do texto..."
+                header_line, content = block.split('\n', 1)
+                num_adicao, num_item = header_line.split('|')
+                
+                item_data = {
+                    'Adição': int(num_adicao),
+                    'Item': int(num_item),
+                    'Código Produto': None,
+                    'Descrição': None,
+                    'II (R$)': 0.0,
+                    'IPI (R$)': 0.0,
+                    'PIS (R$)': 0.0,
+                    'COFINS (R$)': 0.0,
+                    'Check Impostos': 0.0
+                }
 
-        # Impostos (Soma cumulativa caso apareça duplicado ou fragmentado, embora raro)
-        # Usamos 'max' aqui assumindo que se aparecer de novo é o mesmo valor, ou soma se for lógica diferente.
-        # Para DUIMP, geralmente aparece uma vez. Vamos substituir se encontrar valor > 0.
-        
-        for tax in ['ii', 'ipi', 'pis', 'cofins']:
-            m_tax = self.patterns[tax].search(text_block)
-            if m_tax:
-                val = self._clean_currency(m_tax.group(1))
-                key = tax.upper()
-                if val > 0: item_dict[key] = val
+                # Extração de Campos usando o conteúdo do bloco
+                
+                # Código
+                match_cod = self.PATTERNS['PROD_CODE'].search(content)
+                if match_cod:
+                    item_data['Código Produto'] = match_cod.group(1)
+
+                # Descrição
+                match_desc = self.PATTERNS['DESC_COMPLETA'].search(content)
+                if match_desc:
+                    # Limpa quebras de linha excessivas na descrição
+                    desc_clean = re.sub(r'\s+', ' ', match_desc.group(1)).strip()
+                    item_data['Descrição'] = desc_clean
+                
+                # Impostos (Itera sobre as chaves de impostos)
+                tax_map = {
+                    'TAX_II': 'II (R$)',
+                    'TAX_IPI': 'IPI (R$)',
+                    'TAX_PIS': 'PIS (R$)',
+                    'TAX_COFINS': 'COFINS (R$)'
+                }
+                
+                total_impostos_item = 0.0
+                for pattern_key, df_col in tax_map.items():
+                    match_tax = self.PATTERNS[pattern_key].search(content)
+                    if match_tax:
+                        val = self._parse_currency(match_tax.group(1))
+                        item_data[df_col] = val
+                        total_impostos_item += val
+                
+                item_data['Check Impostos'] = total_impostos_item
+                extracted_items.append(item_data)
+
+            except Exception as e:
+                # Log de erro silencioso para não parar o loop, mas poderia ser exibido em modo debug
+                continue
+
+        return pd.DataFrame(extracted_items)
 
 # ==============================================================================
-# FRONTEND (STREAMLIT)
+# INTERFACE DO USUÁRIO (FRONTEND)
 # ==============================================================================
-
-def to_excel(df):
-    """Converte DataFrame para Excel em memória para download."""
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Itens DUIMP')
-        workbook = writer.book
-        worksheet = writer.sheets['Itens DUIMP']
-        
-        # Formatação de moeda
-        money_fmt = workbook.add_format({'num_format': 'R$ #,##0.00'})
-        worksheet.set_column('E:I', 15, money_fmt) # Colunas de impostos
-        
-        # Ajuste de largura
-        worksheet.set_column('C:C', 15) # Código
-        worksheet.set_column('D:D', 40) # Descrição
-        
-    processed_data = output.getvalue()
-    return processed_data
 
 def main():
-    st.title("📄 Extrator Profissional de DUIMP")
+    st.title("🛡️ Extrator DUIMP Pro")
+    st.markdown("### Automação de Conferência Aduaneira")
     st.markdown("""
-    Faça upload do PDF da DUIMP/Siscomex para extrair automaticamente:
-    **Itens, Códigos (Part Number), Descrições e Impostos (II, IPI, PIS, COFINS).**
+    Esta ferramenta foi projetada para ler arquivos PDF de DUIMP complexos (100+ páginas), 
+    garantindo que itens quebrados entre páginas sejam capturados corretamente.
     """)
 
-    # Sidebar para controles
+    # Sidebar de Controle
     with st.sidebar:
-        st.header("Upload")
-        uploaded_file = st.file_uploader("Arraste seu PDF aqui", type=["pdf"])
-        st.info("O processamento é feito localmente na memória. Seus dados estão seguros.")
+        st.header("Entrada de Dados")
+        uploaded_file = st.file_uploader(
+            "Carregar PDF da DUIMP", 
+            type=['pdf'], 
+            help="Arraste o arquivo 'Extrato de conferencia' aqui."
+        )
+        
+        st.divider()
+        st.info("💡 **Dica Profissional:** Verifique se o PDF é legível (texto selecionável) e não uma imagem escaneada.")
 
-    if uploaded_file is not None:
-        parser = DuimpParser()
+    if uploaded_file:
+        processor = DuimpExtractorEngine()
         
         try:
-            with st.spinner('Lendo e estruturando dados do PDF... Isso pode levar alguns segundos.'):
-                # Processamento
-                df = parser.process_file(uploaded_file)
+            # Etapa 1: Leitura (IO Intensive)
+            with st.spinner("🔄 Lendo arquivo e mapeando estrutura (isso pode levar alguns segundos)..."):
+                raw_text = processor.extract_full_text(uploaded_file)
             
-            if df.empty:
-                st.warning("O arquivo foi lido, mas nenhum item foi identificado. Verifique se é um PDF de Extrato de Conferência DUIMP padrão.")
+            # Etapa 2: Processamento (CPU Intensive)
+            with st.spinner("⚙️ Processando lógica de itens e cálculos tributários..."):
+                df_result = processor.process_data(raw_text)
+            
+            # Validação se dados foram extraídos
+            if df_result.empty:
+                st.error("⚠️ Não foi possível identificar itens. O layout do arquivo pode ser diferente do padrão Siscomex DUIMP.")
+                st.stop()
+
+            # Etapa 3: Exibição de Resultados
+            st.success(f"✅ Processamento concluído! {len(df_result)} itens mapeados com sucesso.")
+            
+            # KPIs Tributários
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+            kpi1.metric("Total II", f"R$ {df_result['II (R$)'].sum():,.2f}")
+            kpi2.metric("Total IPI", f"R$ {df_result['IPI (R$)'].sum():,.2f}")
+            kpi3.metric("Total PIS/COFINS", f"R$ {(df_result['PIS (R$)'].sum() + df_result['COFINS (R$)'].sum()):,.2f}")
+            kpi4.metric("Valor Total Tributos", f"R$ {df_result['Check Impostos'].sum():,.2f}")
+
+            # Filtros Dinâmicos
+            st.divider()
+            col_search, col_filter = st.columns([2, 1])
+            with col_search:
+                search_term = st.text_input("🔍 Buscar na Descrição ou Código:", "")
+            
+            if search_term:
+                df_display = df_result[
+                    df_result['Descrição'].str.contains(search_term, case=False, na=False) | 
+                    df_result['Código Produto'].str.contains(search_term, case=False, na=False)
+                ]
             else:
-                # Métricas de Resumo (KPIs)
-                st.divider()
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Total de Itens", len(df))
-                c2.metric("Total II", f"R$ {df['II'].sum():,.2f}")
-                c3.metric("Total IPI", f"R$ {df['IPI'].sum():,.2f}")
-                c4.metric("Total Geral Impostos", f"R$ {df['Total Impostos'].sum():,.2f}")
-                st.divider()
+                df_display = df_result
 
-                # Tabela Interativa
-                st.subheader("Detalhamento dos Itens")
-                st.dataframe(
-                    df, 
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Total Impostos": st.column_config.NumberColumn(format="R$ %.2f"),
-                        "II": st.column_config.NumberColumn(format="R$ %.2f"),
-                        "IPI": st.column_config.NumberColumn(format="R$ %.2f"),
-                        "PIS": st.column_config.NumberColumn(format="R$ %.2f"),
-                        "COFINS": st.column_config.NumberColumn(format="R$ %.2f"),
-                    }
-                )
+            # Grid de Dados
+            st.dataframe(
+                df_display,
+                column_config={
+                    "Adição": st.column_config.NumberColumn("Adição", format="%d"),
+                    "Item": st.column_config.NumberColumn("Item", format="%d"),
+                    "II (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                    "IPI (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                    "PIS (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                    "COFINS (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                    "Check Impostos": st.column_config.NumberColumn("Total Item", format="R$ %.2f"),
+                },
+                use_container_width=True,
+                height=500
+            )
 
-                # Botão de Exportação
-                excel_data = to_excel(df)
-                st.download_button(
-                    label="📥 Baixar Planilha Excel (.xlsx)",
-                    data=excel_data,
-                    file_name="extrato_duimp_processado.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary"
-                )
+            # Exportação
+            st.divider()
+            st.subheader("📤 Exportar Relatório")
+            
+            # Gerar Excel em memória
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_result.to_excel(writer, index=False, sheet_name='Itens DUIMP')
+                
+                # Formatação Excel
+                workbook = writer.book
+                worksheet = writer.sheets['Itens DUIMP']
+                money_fmt = workbook.add_format({'num_format': '#,##0.00'})
+                
+                worksheet.set_column('E:I', 15, money_fmt) # Colunas de valores
+                worksheet.set_column('D:D', 50) # Coluna Descrição Larga
+                
+            st.download_button(
+                label="Baixar Planilha Completa (.xlsx)",
+                data=output.getvalue(),
+                file_name="Relatorio_Analitico_DUIMP.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
 
         except Exception as e:
-            st.error(f"Ocorreu um erro ao processar o arquivo: {e}")
-            st.expander("Ver detalhes do erro").write(e)
-
+            st.error(f"Erro Crítico no Sistema: {str(e)}")
+            # Em produção, aqui entraria um log handler
+            
 if __name__ == "__main__":
     main()
