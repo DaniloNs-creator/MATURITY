@@ -116,70 +116,15 @@ st.markdown("""
         border: 1px solid #E5E7EB;
         margin: 1rem 0;
     }
+    .tax-highlight {
+        background-color: #FEF3C7;
+        padding: 8px;
+        border-radius: 4px;
+        border-left: 3px solid #F59E0B;
+        margin: 2px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
-
-@dataclass
-class ItemProduto:
-    """Classe para representar um item de produto"""
-    numero_item: str
-    ncm: str
-    codigo_produto: str
-    nome_produto: str
-    descricao_produto: str
-    codigo_interno: str
-    quantidade: float
-    unidade_medida: str
-    peso_liquido: float
-    peso_bruto: float
-    valor_unitario: float
-    valor_total: float
-    condicao_venda: str
-    fabricante: str
-    pais_origem: str
-    
-    # Valores e impostos
-    valor_local_embarque: float
-    valor_local_aduanero: float
-    frete_internacional: float
-    seguro_internacional: float
-    
-    # Tributos
-    ii_base_calculo: float
-    ii_aliquota: float
-    ii_valor_calculado: float
-    ii_valor_devido: float
-    ii_suspenso: str
-    
-    ipi_base_calculo: float
-    ipi_aliquota: float
-    ipi_valor_calculado: float
-    ipi_valor_devido: float
-    ipi_suspenso: str
-    
-    pis_base_calculo: float
-    pis_aliquota: float
-    pis_valor_calculado: float
-    pis_valor_devido: float
-    pis_suspenso: str
-    
-    cofins_base_calculo: float
-    cofins_aliquota: float
-    cofins_valor_calculado: float
-    cofins_valor_devido: float
-    cofins_suspenso: str
-    
-    # ICMS
-    icms_regime: str
-    icms_base_calculo: float
-    icms_aliquota: float
-    icms_valor_devido: float
-    icms_suspenso: str
-    
-    # Calculados
-    total_impostos: float = 0.0
-    valor_total_com_impostos: float = 0.0
-    custo_unitario: float = 0.0
 
 class HafelePDFParser:
     """Parser completo para PDFs da Häfele"""
@@ -199,9 +144,9 @@ class HafelePDFParser:
             'itens': [],
             'totais': {}
         }
-        self.current_item = None
+        self.current_item = {}
         self.item_buffer = []
-        self.in_item_section = False
+        self.current_page_num = 0
         
     def parse_pdf(self, pdf_path: str) -> Dict:
         """Parse completo do PDF"""
@@ -214,10 +159,14 @@ class HafelePDFParser:
                 
                 # Processar cada página
                 for page_num, page in enumerate(pdf.pages, 1):
+                    self.current_page_num = page_num
                     logger.info(f"Processando página {page_num}/{total_pages}")
                     text = page.extract_text()
                     
                     if text:
+                        # Limpar e normalizar texto
+                        text = self._clean_text(text)
+                        
                         # Determinar tipo de página
                         if page_num == 1:
                             self._parse_pagina_1(text)
@@ -226,10 +175,14 @@ class HafelePDFParser:
                         else:
                             # Verificar se é página de item
                             if self._is_item_page(text):
-                                self._parse_item_page(text, page_num)
+                                self._parse_item_page(text)
                             else:
-                                # Continuar item anterior
-                                self._continue_item(text, page_num)
+                                # Pode ser continuação de item
+                                self._continue_item(text)
+            
+            # Processar último item se houver
+            if self.current_item:
+                self._finalize_current_item()
             
             # Processar itens coletados
             self._process_items()
@@ -243,6 +196,14 @@ class HafelePDFParser:
         except Exception as e:
             logger.error(f"Erro no parsing: {str(e)}")
             raise
+    
+    def _clean_text(self, text: str) -> str:
+        """Limpa e normaliza o texto"""
+        # Substituir múltiplos espaços por um único
+        text = re.sub(r'\s+', ' ', text)
+        # Corrigir quebras de linha problemáticas
+        text = re.sub(r'(\d) (\d)', r'\1\2', text)
+        return text.strip()
     
     def _parse_pagina_1(self, text: str):
         """Parse da primeira página"""
@@ -376,78 +337,98 @@ class HafelePDFParser:
         """Verifica se é uma página de item"""
         # Padrões que indicam início de item
         item_patterns = [
-            r'^\s*\d+\s+\d{4}\.\d{2}\.\d{2}\s+\d+',
+            r'\b\d+\s+\d{4}\.\d{2}\.\d{2}\s+\d+\b',
             r'ITENS DA DUIMP',
             r'DENOMINACAO DO PRODUTO',
-            r'\d+\s+3926\.',
-            r'\d+\s+8302\.'
+            r'CÓDIGO INTERNO',
+            r'Valor Unit Cond Venda'
         ]
         
         for pattern in item_patterns:
-            if re.search(pattern, text, re.MULTILINE):
+            if re.search(pattern, text, re.IGNORECASE):
                 return True
         
         return False
     
-    def _parse_item_page(self, text: str, page_num: int):
+    def _parse_item_page(self, text: str):
         """Parse de uma página de item"""
-        logger.info(f"Parsing página {page_num} - Item")
+        logger.info(f"Parsing página {self.current_page_num} - Item")
         
         # Se houver item em buffer, finalizá-lo
         if self.current_item:
             self._finalize_current_item()
         
         # Iniciar novo item
-        self.current_item = {}
-        self._parse_item_header(text)
-        self._parse_item_details(text)
-        self._parse_item_values(text)
-        self._parse_item_taxes(text)
+        self.current_item = {
+            'pagina': self.current_page_num,
+            'numero_item': '',
+            'ncm': '',
+            'codigo_produto': '',
+            'nome_produto': '',
+            'codigo_interno': '',
+            'quantidade': 0,
+            'peso_liquido': 0,
+            'valor_unitario': 0,
+            'valor_total': 0,
+            'valor_local_embarque': 0,
+            'valor_local_aduanero': 0,
+            'frete_internacional': 0,
+            'seguro_internacional': 0,
+            'ii_base_calculo': 0,
+            'ii_aliquota': 0,
+            'ii_valor_devido': 0,
+            'ipi_base_calculo': 0,
+            'ipi_aliquota': 0,
+            'ipi_valor_devido': 0,
+            'pis_base_calculo': 0,
+            'pis_aliquota': 0,
+            'pis_valor_devido': 0,
+            'cofins_base_calculo': 0,
+            'cofins_aliquota': 0,
+            'cofins_valor_devido': 0,
+            'icms_regime': '',
+            'icms_base_calculo': 0,
+            'icms_valor_devido': 0,
+            'total_impostos': 0,
+            'valor_total_com_impostos': 0
+        }
         
-        # Adicionar à lista de buffers
-        self.item_buffer.append({
-            'page': page_num,
-            'text': text,
-            'item_data': self.current_item.copy()
-        })
+        # Extrair todas as informações
+        self._extract_all_item_info(text)
     
-    def _continue_item(self, text: str, page_num: int):
+    def _continue_item(self, text: str):
         """Continua parsing de item em múltiplas páginas"""
         if self.current_item:
             # Adicionar texto ao buffer do item atual
-            self.item_buffer.append({
-                'page': page_num,
-                'text': text,
-                'item_data': None  # Continuação
-            })
+            self._extract_all_item_info(text)
     
-    def _parse_item_header(self, text: str):
-        """Parse do cabeçalho do item"""
+    def _extract_all_item_info(self, text: str):
+        """Extrai todas as informações do item de forma robusta"""
         # Número do item, NCM, Código
-        header_pattern = r'^\s*(\d+)\s+(\d{4}\.\d{2}\.\d{2})\s+(\d+)'
-        header_match = re.search(header_pattern, text, re.MULTILINE)
+        header_pattern = r'\b(\d+)\s+(\d{4}\.\d{2}\.\d{2})\s+(\d+)\b'
+        header_match = re.search(header_pattern, text)
         
-        if header_match:
+        if header_match and not self.current_item['numero_item']:
             self.current_item['numero_item'] = header_match.group(1)
             self.current_item['ncm'] = header_match.group(2)
             self.current_item['codigo_produto'] = header_match.group(3)
-    
-    def _parse_item_details(self, text: str):
-        """Parse dos detalhes do produto"""
+        
         # Nome do produto
-        nome_pattern = r'DENOMINACAO DO PRODUTO\s*\n(.+)'
-        nome_match = re.search(nome_pattern, text, re.MULTILINE | re.IGNORECASE)
-        if nome_match:
-            self.current_item['nome_produto'] = nome_match.group(1).strip()
+        if not self.current_item['nome_produto']:
+            nome_pattern = r'DENOMINACAO DO PRODUTO\s*\n?(.+?)(?=\n(?:CÓDIGO|FABRICANTE|DESCRI|CONDI))'
+            nome_match = re.search(nome_pattern, text, re.IGNORECASE | re.DOTALL)
+            if nome_match:
+                self.current_item['nome_produto'] = nome_match.group(1).strip()
         
         # Código interno
-        codigo_pattern = r'Código interno\s+([^\n]+)'
-        codigo_match = re.search(codigo_pattern, text, re.IGNORECASE)
-        if codigo_match:
-            self.current_item['codigo_interno'] = codigo_match.group(1).strip()
+        if not self.current_item['codigo_interno']:
+            codigo_pattern = r'Código interno\s+(.+?)(?:\n|$)'
+            codigo_match = re.search(codigo_pattern, text, re.IGNORECASE)
+            if codigo_match:
+                self.current_item['codigo_interno'] = codigo_match.group(1).strip()
         
         # Quantidade
-        qtd_pattern = r'Qtde Unid. Comercial\s+([\d\.,]+)'
+        qtd_pattern = r'Qtde Unid\. Comercial\s+([\d\.,]+)'
         qtd_match = re.search(qtd_pattern, text)
         if qtd_match:
             self.current_item['quantidade'] = self._parse_valor(qtd_match.group(1))
@@ -465,13 +446,11 @@ class HafelePDFParser:
             self.current_item['valor_unitario'] = self._parse_valor(valor_unit_match.group(1))
         
         # Valor total
-        valor_total_pattern = r'Valor Tot. Cond Venda\s+([\d\.,]+)'
+        valor_total_pattern = r'Valor Tot\. Cond Venda\s+([\d\.,]+)'
         valor_total_match = re.search(valor_total_pattern, text)
         if valor_total_match:
             self.current_item['valor_total'] = self._parse_valor(valor_total_match.group(1))
-    
-    def _parse_item_values(self, text: str):
-        """Parse dos valores do item"""
+        
         # Valores de embarque e aduaneiro
         valores_pattern = r'Local Embarque \(R\$\)\s+([\d\.,]+)'
         valor_emb_match = re.search(valores_pattern, text)
@@ -485,102 +464,114 @@ class HafelePDFParser:
             self.current_item['valor_local_aduanero'] = self._parse_valor(aduaneiro_match.group(1))
         
         # Frete internacional
-        frete_pattern = r'Frete Internac. \(R\$\)\s+([\d\.,]+)'
+        frete_pattern = r'Frete Internac\. \(R\$\)\s+([\d\.,]+)'
         frete_match = re.search(frete_pattern, text)
         if frete_match:
             self.current_item['frete_internacional'] = self._parse_valor(frete_match.group(1))
         
         # Seguro internacional
-        seguro_pattern = r'Seguro Internac. \(R\$\)\s+([\d\.,]+)'
+        seguro_pattern = r'Seguro Internac\. \(R\$\)\s+([\d\.,]+)'
         seguro_match = re.search(seguro_pattern, text)
         if seguro_match:
             self.current_item['seguro_internacional'] = self._parse_valor(seguro_match.group(1))
+        
+        # Extrair todos os tributos usando método robusto
+        self._extract_all_taxes(text)
     
-    def _parse_item_taxes(self, text: str):
-        """Parse dos tributos do item"""
-        # II
-        ii_base_pattern = r'II.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
-        ii_base_match = re.search(ii_base_pattern, text, re.DOTALL)
-        if ii_base_match:
-            self.current_item['ii_base_calculo'] = self._parse_valor(ii_base_match.group(1))
+    def _extract_all_taxes(self, text: str):
+        """Extrai todos os tributos de forma robusta"""
+        # Dividir o texto em seções para análise
+        lines = text.split('\n')
         
-        ii_aliquota_pattern = r'II.*?% Alíquota\s+([\d\.,]+)'
-        ii_aliquota_match = re.search(ii_aliquota_pattern, text, re.DOTALL)
-        if ii_aliquota_match:
-            self.current_item['ii_aliquota'] = self._parse_valor(ii_aliquota_match.group(1))
+        # Procurar por cada tributo linha por linha
+        for i, line in enumerate(lines):
+            line = line.strip()
+            
+            # II
+            if 'II' in line and 'Base de Cálculo' in line:
+                self._extract_tax_value(line, 'ii_base_calculo')
+            elif 'II' in line and '% Alíquota' in line:
+                self._extract_tax_value(line, 'ii_aliquota')
+            elif 'II' in line and 'Valor Devido' in line:
+                self._extract_tax_value(line, 'ii_valor_devido')
+            
+            # IPI
+            elif 'IPI' in line and 'Base de Cálculo' in line:
+                self._extract_tax_value(line, 'ipi_base_calculo')
+            elif 'IPI' in line and '% Alíquota' in line:
+                self._extract_tax_value(line, 'ipi_aliquota')
+            elif 'IPI' in line and 'Valor Devido' in line:
+                self._extract_tax_value(line, 'ipi_valor_devido')
+            
+            # PIS - MÉTODO ROBUSTO
+            elif 'PIS' in line or 'pis' in line.lower():
+                # Procurar valores nas próximas linhas
+                for j in range(i, min(i + 5, len(lines))):
+                    sub_line = lines[j]
+                    if 'Base de Cálculo' in sub_line and not self.current_item['pis_base_calculo']:
+                        self._extract_tax_value(sub_line, 'pis_base_calculo')
+                    elif '% Alíquota' in sub_line and not self.current_item['pis_aliquota']:
+                        self._extract_tax_value(sub_line, 'pis_aliquota')
+                    elif 'Valor Devido' in sub_line and not self.current_item['pis_valor_devido']:
+                        self._extract_tax_value(sub_line, 'pis_valor_devido')
+            
+            # COFINS - MÉTODO ROBUSTO
+            elif 'COFINS' in line or 'cofins' in line.lower():
+                # Procurar valores nas próximas linhas
+                for j in range(i, min(i + 5, len(lines))):
+                    sub_line = lines[j]
+                    if 'Base de Cálculo' in sub_line and not self.current_item['cofins_base_calculo']:
+                        self._extract_tax_value(sub_line, 'cofins_base_calculo')
+                    elif '% Alíquota' in sub_line and not self.current_item['cofins_aliquota']:
+                        self._extract_tax_value(sub_line, 'cofins_aliquota')
+                    elif 'Valor Devido' in sub_line and not self.current_item['cofins_valor_devido']:
+                        self._extract_tax_value(sub_line, 'cofins_valor_devido')
         
-        ii_devido_pattern = r'II.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        ii_devido_match = re.search(ii_devido_pattern, text, re.DOTALL)
-        if ii_devido_match:
-            self.current_item['ii_valor_devido'] = self._parse_valor(ii_devido_match.group(1))
+        # Método alternativo: buscar padrões específicos
+        if not self.current_item['pis_valor_devido']:
+            self._extract_tax_by_pattern(text, 'PIS', 'pis_valor_devido')
         
-        # IPI
-        ipi_base_pattern = r'IPI.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
-        ipi_base_match = re.search(ipi_base_pattern, text, re.DOTALL)
-        if ipi_base_match:
-            self.current_item['ipi_base_calculo'] = self._parse_valor(ipi_base_match.group(1))
+        if not self.current_item['cofins_valor_devido']:
+            self._extract_tax_by_pattern(text, 'COFINS', 'cofins_valor_devido')
+    
+    def _extract_tax_value(self, line: str, field: str):
+        """Extrai valor de imposto de uma linha"""
+        valor_pattern = r'([\d\.,]+)'
+        match = re.search(valor_pattern, line)
+        if match:
+            valor = self._parse_valor(match.group(1))
+            self.current_item[field] = valor
+    
+    def _extract_tax_by_pattern(self, text: str, tributo: str, field: str):
+        """Extrai valor de imposto usando padrões específicos"""
+        # Padrão 1: Valor Devido após o nome do tributo
+        pattern1 = f'{tributo}.*?Valor Devido.*?([\\d\\.,]+)'
+        match1 = re.search(pattern1, text, re.IGNORECASE | re.DOTALL)
+        if match1:
+            self.current_item[field] = self._parse_valor(match1.group(1))
+            return
         
-        ipi_aliquota_pattern = r'IPI.*?% Alíquota\s+([\d\.,]+)'
-        ipi_aliquota_match = re.search(ipi_aliquota_pattern, text, re.DOTALL)
-        if ipi_aliquota_match:
-            self.current_item['ipi_aliquota'] = self._parse_valor(ipi_aliquota_match.group(1))
+        # Padrão 2: Valor após "Valor Devido (R$)"
+        pattern2 = f'{tributo}.*?Valor Devido \\(R\\$\\).*?([\\d\\.,]+)'
+        match2 = re.search(pattern2, text, re.IGNORECASE | re.DOTALL)
+        if match2:
+            self.current_item[field] = self._parse_valor(match2.group(1))
+            return
         
-        ipi_devido_pattern = r'IPI.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        ipi_devido_match = re.search(ipi_devido_pattern, text, re.DOTALL)
-        if ipi_devido_match:
-            self.current_item['ipi_valor_devido'] = self._parse_valor(ipi_devido_match.group(1))
-        
-        # PIS
-        pis_base_pattern = r'PIS.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
-        pis_base_match = re.search(pis_base_pattern, text, re.DOTALL)
-        if pis_base_match:
-            self.current_item['pis_base_calculo'] = self._parse_valor(pis_base_match.group(1))
-        
-        pis_aliquota_pattern = r'PIS.*?% Alíquota\s+([\d\.,]+)'
-        pis_aliquota_match = re.search(pis_aliquota_pattern, text, re.DOTALL)
-        if pis_aliquota_match:
-            self.current_item['pis_aliquota'] = self._parse_valor(pis_aliquota_match.group(1))
-        
-        pis_devido_pattern = r'PIS.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        pis_devido_match = re.search(pis_devido_pattern, text, re.DOTALL)
-        if pis_devido_match:
-            self.current_item['pis_valor_devido'] = self._parse_valor(pis_devido_match.group(1))
-        
-        # COFINS
-        cofins_base_pattern = r'COFINS.*?Base de Cálculo \(R\$\)\s+([\d\.,]+)'
-        cofins_base_match = re.search(cofins_base_pattern, text, re.DOTALL)
-        if cofins_base_match:
-            self.current_item['cofins_base_calculo'] = self._parse_valor(cofins_base_match.group(1))
-        
-        cofins_aliquota_pattern = r'COFINS.*?% Alíquota\s+([\d\.,]+)'
-        cofins_aliquota_match = re.search(cofins_aliquota_pattern, text, re.DOTALL)
-        if cofins_aliquota_match:
-            self.current_item['cofins_aliquota'] = self._parse_valor(cofins_aliquota_match.group(1))
-        
-        cofins_devido_pattern = r'COFINS.*?Valor Devido \(R\$\)\s+([\d\.,]+)'
-        cofins_devido_match = re.search(cofins_devido_pattern, text, re.DOTALL)
-        if cofins_devido_match:
-            self.current_item['cofins_valor_devido'] = self._parse_valor(cofins_devido_match.group(1))
-        
-        # ICMS
-        icms_regime_pattern = r'ICMS.*?Regime de Tributacao\s+([^\n]+)'
-        icms_regime_match = re.search(icms_regime_pattern, text, re.DOTALL)
-        if icms_regime_match:
-            self.current_item['icms_regime'] = icms_regime_match.group(1).strip()
-        
-        icms_base_pattern = r'ICMS.*?Base de Cálculo\s+([\d\.,]+)'
-        icms_base_match = re.search(icms_base_pattern, text, re.DOTALL)
-        if icms_base_match:
-            self.current_item['icms_base_calculo'] = self._parse_valor(icms_base_match.group(1))
-        
-        icms_devido_pattern = r'ICMS.*?Valor Devido\s+([\d\.,]+)'
-        icms_devido_match = re.search(icms_devido_pattern, text, re.DOTALL)
-        if icms_devido_match:
-            self.current_item['icms_valor_devido'] = self._parse_valor(icms_devido_match.group(1))
+        # Padrão 3: Procurar em todo o texto
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if tributo.lower() in line.lower():
+                # Procurar números nas próximas linhas
+                for j in range(i + 1, min(i + 10, len(lines))):
+                    valor_match = re.search(r'([\d\.,]+)', lines[j])
+                    if valor_match:
+                        self.current_item[field] = self._parse_valor(valor_match.group(1))
+                        return
     
     def _finalize_current_item(self):
         """Finaliza o item atual e adiciona à lista"""
-        if self.current_item:
+        if self.current_item and self.current_item.get('numero_item'):
             # Calcular totais
             ii = self.current_item.get('ii_valor_devido', 0)
             ipi = self.current_item.get('ipi_valor_devido', 0)
@@ -593,20 +584,23 @@ class HafelePDFParser:
             self.current_item['total_impostos'] = total_impostos
             self.current_item['valor_total_com_impostos'] = valor_total + total_impostos
             
+            # Log dos valores extraídos para debug
+            logger.info(f"Item {self.current_item['numero_item']}: "
+                       f"II={ii:.2f}, IPI={ipi:.2f}, PIS={pis:.2f}, COFINS={cofins:.2f}, "
+                       f"Total={total_impostos:.2f}")
+            
             # Adicionar à lista de itens
             self.documento['itens'].append(self.current_item.copy())
-            self.current_item = None
     
     def _process_items(self):
         """Processa todos os itens do buffer"""
-        logger.info(f"Processando {len(self.item_buffer)} buffers de itens")
-        
-        for buffer in self.item_buffer:
-            if buffer['item_data']:
-                # Se já tem dados processados, adicionar
-                self.documento['itens'].append(buffer['item_data'])
-        
         logger.info(f"Total de itens processados: {len(self.documento['itens'])}")
+        
+        # Log detalhado dos impostos extraídos
+        for item in self.documento['itens']:
+            logger.debug(f"Item {item.get('numero_item', 'N/A')}: "
+                        f"PIS={item.get('pis_valor_devido', 0):.2f}, "
+                        f"COFINS={item.get('cofins_valor_devido', 0):.2f}")
     
     def _calculate_totals(self):
         """Calcula totais do documento"""
@@ -642,6 +636,13 @@ class HafelePDFParser:
             totais['seguro_total']
         )
         
+        # Log dos totais
+        logger.info(f"Totais: II={totais['ii_total']:.2f}, "
+                   f"IPI={totais['ipi_total']:.2f}, "
+                   f"PIS={totais['pis_total']:.2f}, "
+                   f"COFINS={totais['cofins_total']:.2f}, "
+                   f"Total Impostos={totais['total_impostos']:.2f}")
+        
         self.documento['totais'] = totais
     
     def _parse_valor(self, valor_str: str) -> float:
@@ -664,14 +665,15 @@ class FinancialAnalyzer:
         self.itens_df = None
         self.totais_df = None
         self.analises = {}
+        self.problems = []
         
     def prepare_dataframes(self):
         """Prepara DataFrames para análise"""
         # DataFrame de itens
         itens_data = []
-        for item in self.documento['itens']:
-            itens_data.append({
-                'Item': item.get('numero_item', ''),
+        for idx, item in enumerate(self.documento['itens']):
+            item_data = {
+                'Item': item.get('numero_item', f'N/A-{idx}'),
                 'NCM': item.get('ncm', ''),
                 'Código': item.get('codigo_produto', ''),
                 'Código Interno': item.get('codigo_interno', ''),
@@ -688,8 +690,18 @@ class FinancialAnalyzer:
                 'COFINS (R$)': item.get('cofins_valor_devido', 0),
                 'Total Impostos (R$)': item.get('total_impostos', 0),
                 'Valor c/ Impostos (R$)': item.get('valor_total_com_impostos', 0),
-                'Custo Unitário (R$)': item.get('valor_total_com_impostos', 0) / item.get('quantidade', 1) if item.get('quantidade', 0) > 0 else 0
-            })
+                'Custo Unitário (R$)': item.get('valor_total_com_impostos', 0) / item.get('quantidade', 1) if item.get('quantidade', 0) > 0 else 0,
+                'Pagina': item.get('pagina', 0)
+            }
+            
+            # Verificar problemas na extração
+            if item.get('pis_valor_devido', 0) == 0:
+                self.problems.append(f"Item {item.get('numero_item', 'N/A')}: PIS não extraído")
+            
+            if item.get('cofins_valor_devido', 0) == 0:
+                self.problems.append(f"Item {item.get('numero_item', 'N/A')}: COFINS não extraído")
+            
+            itens_data.append(item_data)
         
         self.itens_df = pd.DataFrame(itens_data)
         
@@ -726,6 +738,12 @@ class FinancialAnalyzer:
         
         # Calcular análises
         self._calculate_analyses()
+        
+        # Log de problemas
+        if self.problems:
+            logger.warning(f"Problemas encontrados: {len(self.problems)}")
+            for problem in self.problems[:5]:  # Mostrar apenas os 5 primeiros
+                logger.warning(problem)
     
     def _calculate_analyses(self):
         """Calcula análises financeiras"""
@@ -758,193 +776,17 @@ class FinancialAnalyzer:
                 self.analises['top_itens_valor'] = self.itens_df.nlargest(10, 'Valor Total (R$)')
             if 'Total Impostos (R$)' in self.itens_df.columns:
                 self.analises['top_itens_impostos'] = self.itens_df.nlargest(10, 'Total Impostos (R$)')
-
-class VisualizadorCompleto:
-    """Visualizador completo dos dados"""
-    
-    @staticmethod
-    def format_dataframe(df, currency_cols=None, percent_cols=None):
-        """Formata DataFrame sem usar background_gradient"""
-        if currency_cols is None:
-            currency_cols = []
-        if percent_cols is None:
-            percent_cols = []
         
-        # Formatação básica
-        for col in currency_cols:
-            if col in df.columns:
-                df[col] = df[col].apply(lambda x: f'R$ {x:,.2f}' if pd.notnull(x) else 'R$ 0,00')
-        
-        for col in percent_cols:
-            if col in df.columns:
-                df[col] = df[col].apply(lambda x: f'{x:.2f}%' if pd.notnull(x) else '0,00%')
-        
-        return df
-    
-    @staticmethod
-    def criar_dashboard_resumo(analyser: FinancialAnalyzer):
-        """Cria dashboard de resumo"""
-        totais = analyser.documento['totais']
-        
-        # Métricas principais
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.markdown(f"""
-            <div class="section-card">
-                <div class="metric-value">R$ {totais.get('valor_total_mercadoria', 0):,.2f}</div>
-                <div class="metric-label">Valor Mercadoria</div>
-                <span class="badge badge-info">{len(analyser.documento['itens'])} itens</span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            percent_impostos = (totais.get('total_impostos', 0) / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0
-            st.markdown(f"""
-            <div class="section-card">
-                <div class="metric-value">R$ {totais.get('total_impostos', 0):,.2f}</div>
-                <div class="metric-label">Total Impostos</div>
-                <span class="badge badge-warning">
-                    {percent_impostos:.1f}%
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f"""
-            <div class="section-card">
-                <div class="metric-value">R$ {totais.get('valor_total_com_impostos', 0):,.2f}</div>
-                <div class="metric-label">Custo Total</div>
-                <span class="badge badge-success">Completo</span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            custo_kg = (totais.get('valor_total_com_impostos', 0) / totais.get('peso_total', 1)) if totais.get('peso_total', 0) > 0 else 0
-            st.markdown(f"""
-            <div class="section-card">
-                <div class="metric-value">{totais.get('peso_total', 0):,.1f}</div>
-                <div class="metric-label">Peso Total (kg)</div>
-                <span class="badge badge-info">
-                    R$ {custo_kg:,.2f}/kg
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Detalhamento de impostos
-        st.markdown('<h3 class="sub-header">📊 Detalhamento de Impostos</h3>', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            # Tabela de impostos
-            impostos_data = []
-            for tributo, valor in [
-                ('II', totais.get('ii_total', 0)),
-                ('IPI', totais.get('ipi_total', 0)),
-                ('PIS', totais.get('pis_total', 0)),
-                ('COFINS', totais.get('cofins_total', 0))
-            ]:
-                percent_merc = (valor / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0
-                percent_impostos_total = (valor / totais.get('total_impostos', 1) * 100) if totais.get('total_impostos', 0) > 0 else 0
-                impostos_data.append({
-                    'Imposto': tributo,
-                    'Valor (R$)': f'R$ {valor:,.2f}',
-                    '% sobre Mercadoria': f'{percent_merc:.2f}%',
-                    '% sobre Total Impostos': f'{percent_impostos_total:.2f}%'
-                })
-            
-            impostos_df = pd.DataFrame(impostos_data)
-            
-            # Estilizar manualmente
-            st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-            st.dataframe(
-                impostos_df,
-                use_container_width=True,
-                hide_index=True
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        with col2:
-            # Gráfico de impostos
-            impostos_chart_data = {
-                'Imposto': ['II', 'IPI', 'PIS', 'COFINS'],
-                'Valor': [
-                    totais.get('ii_total', 0),
-                    totais.get('ipi_total', 0),
-                    totais.get('pis_total', 0),
-                    totais.get('cofins_total', 0)
-                ]
+        # Análise de problemas
+        if self.itens_df is not None:
+            zero_pis = (self.itens_df['PIS (R$)'] == 0).sum()
+            zero_cofins = (self.itens_df['COFINS (R$)'] == 0).sum()
+            self.analises['problemas'] = {
+                'itens_sem_pis': zero_pis,
+                'itens_sem_cofins': zero_cofins,
+                'percent_sem_pis': (zero_pis / len(self.itens_df) * 100) if len(self.itens_df) > 0 else 0,
+                'percent_sem_cofins': (zero_cofins / len(self.itens_df) * 100) if len(self.itens_df) > 0 else 0
             }
-            
-            impostos_chart_df = pd.DataFrame(impostos_chart_data)
-            
-            fig = px.pie(
-                impostos_chart_df,
-                values='Valor',
-                names='Imposto',
-                title='Distribuição dos Impostos',
-                hole=0.4,
-                color_discrete_sequence=['#3B82F6', '#10B981', '#F59E0B', '#EF4444']
-            )
-            fig.update_traces(textposition='inside', textinfo='percent+label')
-            fig.update_layout(
-                height=350,
-                margin=dict(t=50, b=20, l=20, r=20)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Análises por NCM
-        st.markdown('<h3 class="sub-header">🏷️ Análise por NCM</h3>', unsafe_allow_html=True)
-        
-        if analyser.itens_df is not None and not analyser.itens_df.empty:
-            # Garantir que as colunas existem
-            required_cols = ['NCM', 'Quantidade', 'Valor Total (R$)', 'Total Impostos (R$)']
-            if all(col in analyser.itens_df.columns for col in required_cols):
-                ncm_analysis = analyser.itens_df.groupby('NCM').agg({
-                    'Quantidade': 'sum',
-                    'Valor Total (R$)': 'sum',
-                    'Total Impostos (R$)': 'sum'
-                }).reset_index()
-                
-                total_valor = ncm_analysis['Valor Total (R$)'].sum()
-                if total_valor > 0:
-                    ncm_analysis['% Valor'] = (ncm_analysis['Valor Total (R$)'] / total_valor * 100)
-                else:
-                    ncm_analysis['% Valor'] = 0
-                
-                ncm_analysis = ncm_analysis.sort_values('Valor Total (R$)', ascending=False)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Formatar para exibição
-                    display_df = ncm_analysis.copy()
-                    display_df['Quantidade'] = display_df['Quantidade'].apply(lambda x: f'{x:,.2f}')
-                    display_df['Valor Total (R$)'] = display_df['Valor Total (R$)'].apply(lambda x: f'R$ {x:,.2f}')
-                    display_df['Total Impostos (R$)'] = display_df['Total Impostos (R$)'].apply(lambda x: f'R$ {x:,.2f}')
-                    display_df['% Valor'] = display_df['% Valor'].apply(lambda x: f'{x:.2f}%')
-                    
-                    st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-                    st.dataframe(
-                        display_df,
-                        use_container_width=True
-                    )
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                with col2:
-                    if len(ncm_analysis) > 0:
-                        top_ncm = ncm_analysis.head(10)
-                        fig = px.bar(
-                            top_ncm,
-                            x='NCM',
-                            y='Valor Total (R$)',
-                            title='Top 10 NCMs por Valor',
-                            color='Valor Total (R$)',
-                            color_continuous_scale='Blues'
-                        )
-                        fig.update_layout(height=400, xaxis_tickangle=-45)
-                        st.plotly_chart(fig, use_container_width=True)
 
 def main():
     """Função principal"""
@@ -955,7 +797,7 @@ def main():
     st.markdown("""
     <div class="highlight-box">
         <strong>🔍 Sistema Profissional de Extração e Análise</strong><br>
-        Extração completa de todos os dados de extratos Häfele, incluindo itens, impostos, valores e análise financeira detalhada.
+        Extração completa de todos os dados de extratos Häfele, incluindo <strong>PIS e COFINS</strong> de todos os itens.
         Suporta documentos com centenas de páginas.
     </div>
     """, unsafe_allow_html=True)
@@ -974,12 +816,8 @@ def main():
         
         st.markdown("### ⚙️ Configurações de Processamento")
         
-        process_option = st.selectbox(
-            "Modo de processamento:",
-            ["Completo (Recomendado)", "Apenas Itens", "Apenas Resumo"]
-        )
-        
-        show_debug = st.checkbox("Mostrar informações de debug", value=False)
+        show_tax_details = st.checkbox("Mostrar detalhes de impostos por item", value=True)
+        show_problems = st.checkbox("Mostrar problemas de extração", value=True)
         
         st.markdown("---")
         
@@ -1050,32 +888,160 @@ def main():
                     pass
             
             # Informações do processamento
+            totais = documento['totais']
             st.markdown(f"""
             <div class="warning-box">
                 <strong>📋 Resumo do Processamento:</strong><br>
                 • <strong>{len(documento['itens'])} itens</strong> extraídos<br>
-                • <strong>{len(documento.get('moedas', []))} moedas</strong> identificadas<br>
-                • <strong>R$ {documento['totais'].get('valor_total_com_impostos', 0):,.2f}</strong> custo total<br>
-                • <strong>R$ {documento['totais'].get('total_impostos', 0):,.2f}</strong> em impostos
+                • <strong>R$ {totais.get('valor_total_com_impostos', 0):,.2f}</strong> custo total<br>
+                • <strong>R$ {totais.get('total_impostos', 0):,.2f}</strong> em impostos<br>
+                • <strong>R$ {totais.get('pis_total', 0):,.2f}</strong> em PIS<br>
+                • <strong>R$ {totais.get('cofins_total', 0):,.2f}</strong> em COFINS
             </div>
             """, unsafe_allow_html=True)
+            
+            # Mostrar problemas de extração
+            if show_problems and analyser.problems:
+                with st.expander("⚠️ Problemas de Extração Identificados", expanded=True):
+                    st.warning(f"Encontrados {len(analyser.problems)} problemas na extração de impostos:")
+                    for problem in analyser.problems[:10]:  # Mostrar apenas os 10 primeiros
+                        st.markdown(f"• {problem}")
+                    
+                    if len(analyser.problems) > 10:
+                        st.info(f"... e mais {len(analyser.problems) - 10} problemas")
             
             # Módulos selecionados
             if "Dashboard Resumo" in modules:
                 st.markdown('<h2 class="sub-header">📈 Dashboard Resumo</h2>', unsafe_allow_html=True)
-                VisualizadorCompleto.criar_dashboard_resumo(analyser)
+                
+                # Métricas principais
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.markdown(f"""
+                    <div class="section-card">
+                        <div class="metric-value">R$ {totais.get('valor_total_mercadoria', 0):,.2f}</div>
+                        <div class="metric-label">Valor Mercadoria</div>
+                        <span class="badge badge-info">{len(documento['itens'])} itens</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    percent_impostos = (totais.get('total_impostos', 0) / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0
+                    st.markdown(f"""
+                    <div class="section-card">
+                        <div class="metric-value">R$ {totais.get('total_impostos', 0):,.2f}</div>
+                        <div class="metric-label">Total Impostos</div>
+                        <span class="badge badge-warning">{percent_impostos:.1f}%</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col3:
+                    st.markdown(f"""
+                    <div class="section-card">
+                        <div class="metric-value">R$ {totais.get('pis_total', 0):,.2f}</div>
+                        <div class="metric-label">Total PIS</div>
+                        <span class="badge badge-info">
+                            {(totais.get('pis_total', 0) / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0:.2f}%
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col4:
+                    st.markdown(f"""
+                    <div class="section-card">
+                        <div class="metric-value">R$ {totais.get('cofins_total', 0):,.2f}</div>
+                        <div class="metric-label">Total COFINS</div>
+                        <span class="badge badge-info">
+                            {(totais.get('cofins_total', 0) / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0:.2f}%
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Detalhamento de impostos
+                st.markdown('<h3 class="sub-header">📊 Detalhamento de Impostos</h3>', unsafe_allow_html=True)
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    # Tabela de impostos
+                    impostos_data = []
+                    for tributo, valor in [
+                        ('II', totais.get('ii_total', 0)),
+                        ('IPI', totais.get('ipi_total', 0)),
+                        ('PIS', totais.get('pis_total', 0)),
+                        ('COFINS', totais.get('cofins_total', 0))
+                    ]:
+                        percent_merc = (valor / totais.get('valor_total_mercadoria', 1) * 100) if totais.get('valor_total_mercadoria', 0) > 0 else 0
+                        percent_impostos_total = (valor / totais.get('total_impostos', 1) * 100) if totais.get('total_impostos', 0) > 0 else 0
+                        impostos_data.append({
+                            'Imposto': tributo,
+                            'Valor (R$)': f'R$ {valor:,.2f}',
+                            '% sobre Mercadoria': f'{percent_merc:.2f}%',
+                            '% sobre Total Impostos': f'{percent_impostos_total:.2f}%'
+                        })
+                    
+                    impostos_df = pd.DataFrame(impostos_data)
+                    
+                    st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
+                    st.dataframe(
+                        impostos_df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with col2:
+                    # Gráfico de impostos
+                    impostos_chart_data = {
+                        'Imposto': ['II', 'IPI', 'PIS', 'COFINS'],
+                        'Valor': [
+                            totais.get('ii_total', 0),
+                            totais.get('ipi_total', 0),
+                            totais.get('pis_total', 0),
+                            totais.get('cofins_total', 0)
+                        ]
+                    }
+                    
+                    impostos_chart_df = pd.DataFrame(impostos_chart_data)
+                    
+                    fig = px.pie(
+                        impostos_chart_df,
+                        values='Valor',
+                        names='Imposto',
+                        title='Distribuição dos Impostos',
+                        hole=0.4,
+                        color_discrete_sequence=['#3B82F6', '#10B981', '#F59E0B', '#EF4444']
+                    )
+                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    fig.update_layout(
+                        height=350,
+                        margin=dict(t=50, b=20, l=20, r=20)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
             
             if "Lista Completa de Itens" in modules and analyser.itens_df is not None:
                 st.markdown('<h2 class="sub-header">📦 Lista Completa de Itens</h2>', unsafe_allow_html=True)
                 
+                # Estatísticas de extração
+                if 'analises' in analyser.analises and 'problemas' in analyser.analises['analises']:
+                    problemas = analyser.analises['analises']['problemas']
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Itens sem PIS", problemas['itens_sem_pis'], f"{problemas['percent_sem_pis']:.1f}%")
+                    with col2:
+                        st.metric("Itens sem COFINS", problemas['itens_sem_cofins'], f"{problemas['percent_sem_cofins']:.1f}%")
+                
                 # Filtros
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     search_term = st.text_input("🔍 Buscar:", "", key="search_items")
                 with col2:
                     min_valor = st.number_input("Valor mínimo (R$):", min_value=0.0, value=0.0, step=1000.0, key="min_valor")
                 with col3:
                     ncm_filter = st.text_input("Filtrar por NCM:", "", key="ncm_filter")
+                with col4:
+                    show_zero_tax = st.checkbox("Mostrar itens sem impostos", value=False)
                 
                 # Aplicar filtros
                 filtered_df = analyser.itens_df.copy()
@@ -1091,6 +1057,10 @@ def main():
                 
                 if ncm_filter and 'NCM' in filtered_df.columns:
                     filtered_df = filtered_df[filtered_df['NCM'].astype(str).str.contains(ncm_filter)]
+                
+                if not show_zero_tax:
+                    if 'PIS (R$)' in filtered_df.columns and 'COFINS (R$)' in filtered_df.columns:
+                        filtered_df = filtered_df[(filtered_df['PIS (R$)'] > 0) & (filtered_df['COFINS (R$)'] > 0)]
                 
                 # Exibir tabela
                 if not filtered_df.empty:
@@ -1110,15 +1080,37 @@ def main():
                             else:
                                 display_df[col] = display_df[col].apply(lambda x: f'R$ {x:,.2f}' if pd.notnull(x) else 'R$ 0,00')
                     
+                    # Destacar valores zero em PIS e COFINS
+                    def highlight_zero(val):
+                        if isinstance(val, str) and 'R$ 0,00' in val:
+                            return 'background-color: #FEE2E2'
+                        return ''
+                    
                     st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
                     st.dataframe(
-                        display_df,
+                        display_df.style.applymap(highlight_zero, subset=['PIS (R$)', 'COFINS (R$)']),
                         use_container_width=True,
                         height=600
                     )
                     st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.info("Nenhum item encontrado com os filtros aplicados.")
+                
+                # Detalhes de impostos por item
+                if show_tax_details:
+                    with st.expander("📋 Detalhes de Impostos por Item", expanded=False):
+                        tax_details_df = analyser.itens_df[['Item', 'Produto', 'II (R$)', 'IPI (R$)', 'PIS (R$)', 'COFINS (R$)', 'Total Impostos (R$)']].copy()
+                        tax_details_df = tax_details_df.sort_values('Total Impostos (R$)', ascending=False)
+                        
+                        # Formatar
+                        for col in ['II (R$)', 'IPI (R$)', 'PIS (R$)', 'COFINS (R$)', 'Total Impostos (R$)']:
+                            tax_details_df[col] = tax_details_df[col].apply(lambda x: f'R$ {x:,.2f}')
+                        
+                        st.dataframe(
+                            tax_details_df,
+                            use_container_width=True,
+                            height=400
+                        )
             
             if "Exportação Completa" in modules:
                 st.markdown('<h2 class="sub-header">💾 Exportação de Dados</h2>', unsafe_allow_html=True)
@@ -1134,7 +1126,7 @@ def main():
                             data=csv_itens,
                             file_name="itens_completos.csv",
                             mime="text/csv",
-                            help="Lista completa de itens"
+                            help="Lista completa de itens com impostos"
                         )
                 
                 with col2:
@@ -1183,6 +1175,11 @@ def main():
                                         'Total Impostos (R$)': 'sum'
                                     }).reset_index()
                                     ncm_df.to_excel(writer, sheet_name='Por NCM', index=False)
+                            
+                            # Adicionar problemas de extração
+                            if analyser.problems:
+                                problems_df = pd.DataFrame({'Problemas': analyser.problems})
+                                problems_df.to_excel(writer, sheet_name='Problemas', index=False)
                         
                         st.download_button(
                             label="📊 Excel Completo",
@@ -1193,30 +1190,6 @@ def main():
                         )
                     except Exception as e:
                         st.error(f"Erro ao criar Excel: {str(e)}")
-            
-            if show_debug:
-                st.markdown('<h2 class="sub-header">🔧 Informações de Debug</h2>', unsafe_allow_html=True)
-                
-                tab1, tab2, tab3 = st.tabs(["📄 Estrutura", "📊 Estatísticas", "⚠️ Logs"])
-                
-                with tab1:
-                    st.json(documento, expanded=False)
-                
-                with tab2:
-                    st.metric("Total de Itens", len(documento['itens']))
-                    st.metric("Total de Páginas", len(parser.item_buffer))
-                    st.metric("Tamanho do JSON", f"{len(json.dumps(documento)) / 1024:.1f} KB")
-                    if analyser.itens_df is not None:
-                        st.metric("Colunas no DataFrame", len(analyser.itens_df.columns))
-                
-                with tab3:
-                    st.code("""
-                    Processamento concluído com sucesso!
-                    - Parser inicializado corretamente
-                    - Todas as páginas processadas
-                    - Itens extraídos: {}
-                    - Valores calculados: OK
-                    """.format(len(documento['itens'])))
         
         except Exception as e:
             st.error(f"❌ Erro no processamento: {str(e)}")
@@ -1228,23 +1201,22 @@ def main():
         <div class="section-card">
             <h3>🚀 Sistema de Extração e Análise Häfele</h3>
             <p>Este sistema é projetado para processar <strong>documentos completos</strong> da Häfele, 
-            extraindo todas as informações de forma estruturada e realizando análises financeiras detalhadas.</p>
+            extraindo <strong>TODOS os impostos (II, IPI, PIS, COFINS)</strong> de forma precisa e realizando análises financeiras detalhadas.</p>
             
-            <h4>📋 Funcionalidades Principais:</h4>
+            <h4>🔧 Melhorias Implementadas:</h4>
             <ul>
-                <li><strong>Extração Completa:</strong> Todos os dados do PDF, página por página</li>
-                <li><strong>Análise de Impostos:</strong> II, IPI, PIS, COFINS detalhados</li>
-                <li><strong>Dashboard Interativo:</strong> Métricas e visualizações em tempo real</li>
-                <li><strong>Exportação Completa:</strong> CSV, Excel, JSON</li>
-                <li><strong>Processamento em Lote:</strong> Suporta documentos grandes</li>
+                <li><strong>Extração Robusta de PIS/COFINS:</strong> Múltiplos métodos para garantir captura completa</li>
+                <li><strong>Detecção de Problemas:</strong> Identifica itens onde impostos não foram extraídos</li>
+                <li><strong>Logging Detalhado:</strong> Para debug e monitoramento</li>
+                <li><strong>Interface Aprimorada:</strong> Destaque para valores problemáticos</li>
             </ul>
             
-            <h4>🔧 Como usar:</h4>
+            <h4>📋 Como usar:</h4>
             <ol>
                 <li>Faça upload do PDF no menu lateral</li>
-                <li>Selecione os módulos de análise desejados</li>
-                <li>Aguarde o processamento completo</li>
-                <li>Explore os resultados e exporte os dados</li>
+                <li>Selecione "Mostrar problemas de extração" para verificar PIS/COFINS</li>
+                <li>Explore os resultados com os filtros disponíveis</li>
+                <li>Exporte os dados para análise externa</li>
             </ol>
         </div>
         """, unsafe_allow_html=True)
