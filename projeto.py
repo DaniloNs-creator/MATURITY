@@ -1,425 +1,309 @@
+import streamlit as st
+import pandas as pd
+import pdfplumber
 import re
-from typing import Dict, List
+import os
+import logging
+import tempfile
+from typing import Dict, List, Optional
 
-class DocumentExtractor:
+# --- Configuração de Logging e Página ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+st.set_page_config(
+    page_title="Análise DUIMP/Invoice Pro",
+    page_icon="🏢",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- CSS Profissional ---
+st.markdown("""
+<style>
+    .main-header { font-size: 2.5rem; color: #0f172a; font-weight: 800; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+    .sub-header { font-size: 1.5rem; color: #334155; font-weight: 600; margin-top: 20px; }
+    .metric-card { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .metric-value { font-size: 1.8rem; font-weight: bold; color: #2563eb; }
+    .metric-label { font-size: 0.9rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stDataFrame { border: 1px solid #e2e8f0; border-radius: 5px; }
+</style>
+""", unsafe_allow_html=True)
+
+class AdvancedPDFParser:
+    """
+    Parser avançado utilizando expressões regulares com flags DOTALL
+    para capturar blocos de texto multilinha entre seções conhecidas.
+    """
+    
     def __init__(self):
-        self._current_item = {}
-    
-    def _parse_valor(self, valor_str: str) -> float:
-        """Converte string de valor para float"""
+        self.documento = {'itens': [], 'totais': {}}
+
+    def parse_pdf(self, pdf_path: str) -> Dict:
         try:
-            valor_str = valor_str.replace('.', '').replace(',', '.')
-            return float(valor_str)
-        except (ValueError, AttributeError):
-            return 0.0
-    
-    def _find_tax_near_text(self, text: str, tax_name: str) -> float:
-        """Busca valores de impostos próximos ao nome do imposto"""
-        pattern = rf'{tax_name}.*?([\d\.,]+)\s*R\$\s*([\d\.,]+)'
-        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-        if match:
-            return self._parse_valor(match.group(2))
-        return 0.0
-    
-    def _extract_basic_item_info(self, text: str) -> Dict:
-        """Extrai informações básicas da tabela inicial"""
-        item = {}
-        
-        # Padrão para capturar a linha da tabela
-        table_pattern = r'\|(\d+)\s*\|\s*[✅✔✓]\s*\|([\d\.]+)\s*\|(\d+)\s*\|(\d+)\s*\|(\w+)\s*\|(\d+)'
-        table_match = re.search(table_pattern, text)
-        
-        if table_match:
-            item['item'] = table_match.group(1)
-            item['ncm'] = table_match.group(2)
-            item['codigo_produto'] = table_match.group(3)
-            item['versao'] = table_match.group(4)
-            item['cond_venda'] = table_match.group(5)
-            item['fatura_invoice'] = table_match.group(6)
-        
-        return item
-    
-    def _extract_dados_mercadoria(self, text: str, item: Dict) -> Dict:
-        """Extrai dados da seção DADOS DA MERCADORIA"""
-        
-        # Aplicação
-        aplicacao_pattern = r'Aplicação\s*\n?\s*(\w+)'
-        aplicacao_match = re.search(aplicacao_pattern, text, re.IGNORECASE)
-        if aplicacao_match:
-            item['aplicacao'] = aplicacao_match.group(1)
-        
-        # Condição Mercadoria
-        cond_merc_pattern = r'Condição Mercadoria\s*\n?\s*(\w+)'
-        cond_merc_match = re.search(cond_merc_pattern, text, re.IGNORECASE)
-        if cond_merc_match:
-            item['condicao_mercadoria'] = cond_merc_match.group(1)
-        
-        # Qtde Unid. Estatística
-        qtd_estat_pattern = r'Qtde Unid\. Estatistica\s*([\d\.,]+)'
-        qtd_estat_match = re.search(qtd_estat_pattern, text, re.IGNORECASE)
-        if qtd_estat_match:
-            item['qtde_unid_estatistica'] = self._parse_valor(qtd_estat_match.group(1))
-        
-        # Unidade Estatística
-        unid_estat_pattern = r'Unidad Estatistica\s*\n?\s*([A-ZÀ-Ü\s]+)'
-        unid_estat_match = re.search(unid_estat_pattern, text, re.IGNORECASE)
-        if unid_estat_match:
-            item['unidade_estatistica'] = unid_estat_match.group(1).strip()
-        
-        # Qtde Unid. Comercial
-        qtd_comerc_pattern = r'Qtde Unid\. Comercial\s*([\d\.,]+)'
-        qtd_comerc_match = re.search(qtd_comerc_pattern, text, re.IGNORECASE)
-        if qtd_comerc_match:
-            item['qtde_unid_comercial'] = self._parse_valor(qtd_comerc_match.group(1))
-        
-        # Unidade Comercial
-        unid_comerc_pattern = r'Unidade Comercial\s*\n?\s*(\w+)'
-        unid_comerc_match = re.search(unid_comerc_pattern, text, re.IGNORECASE)
-        if unid_comerc_match:
-            item['unidade_comercial'] = unid_comerc_match.group(1)
-        
-        # Peso Líquido
-        peso_pattern = r'Peso Líquido \(KG\)\s*([\d\.,]+)'
-        peso_match = re.search(peso_pattern, text, re.IGNORECASE)
-        if peso_match:
-            item['peso_liquido_kg'] = self._parse_valor(peso_match.group(1))
-        
-        # Moeda Negociada
-        moeda_pattern = r'Moeda Negociada\s*\n?\s*(\d+)\s*-\s*([\w\s]+)'
-        moeda_match = re.search(moeda_pattern, text, re.IGNORECASE)
-        if moeda_match:
-            item['moeda_codigo'] = moeda_match.group(1)
-            item['moeda_nome'] = moeda_match.group(2).strip()
-        
-        # Valor Unitário
-        valor_unit_pattern = r'Valor Unit Cond Venda\s*([\d\.,]+)'
-        valor_unit_match = re.search(valor_unit_pattern, text, re.IGNORECASE)
-        if valor_unit_match:
-            item['valor_unitario'] = self._parse_valor(valor_unit_match.group(1))
-        
-        # Valor Total
-        valor_total_pattern = r'Valor Tot\. Cond Venda\s*([\d\.,]+)'
-        valor_total_match = re.search(valor_total_pattern, text, re.IGNORECASE)
-        if valor_total_match:
-            item['valor_total'] = self._parse_valor(valor_total_match.group(1))
-        
-        return item
-    
-    def _extract_taxes_directly(self, text: str, item: Dict) -> Dict:
-        """Extrai impostos diretamente do texto"""
-        # MÉTODO 1: Buscar "Valor Devido" em sequência
-        valor_devido_pattern = r'Valor Devido \(R\$\)\s*([\d\.,]+)'
-        valor_devido_matches = list(re.finditer(valor_devido_pattern, text))
-        
-        # Se encontrou 4 valores (II, IPI, PIS, COFINS)
-        if len(valor_devido_matches) >= 4:
-            item['ii_valor_devido'] = self._parse_valor(valor_devido_matches[0].group(1))
-            item['ipi_valor_devido'] = self._parse_valor(valor_devido_matches[1].group(1))
-            item['pis_valor_devido'] = self._parse_valor(valor_devido_matches[2].group(1))
-            item['cofins_valor_devido'] = self._parse_valor(valor_devido_matches[3].group(1))
-        
-        # MÉTODO 2: Buscar cada imposto individualmente
-        else:
-            patterns = {
-                'pis_valor_devido': r'PIS.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
-                'cofins_valor_devido': r'COFINS.*?Valor Devido \(R\$\)\s*([\d\.,]+)'
-            }
+            with pdfplumber.open(pdf_path) as pdf:
+                full_text = ""
+                # Concatena todas as páginas para tratar itens que quebram de página
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        full_text += text + "\n"
             
-            for tax_key, pattern in patterns.items():
-                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-                if match:
-                    item[tax_key] = self._parse_valor(match.group(1))
+            # Normalização básica
+            full_text = self._normalize_text(full_text)
+            self._process_text(full_text)
+            return self.documento
+        except Exception as e:
+            logger.error(f"Erro fatal no parsing: {e}")
+            raise
+
+    def _normalize_text(self, text: str) -> str:
+        # Remove caracteres de controle estranhos, mas mantém quebras de linha essenciais
+        return text
+
+    def _process_text(self, text: str):
+        # Regex Mestre: Busca o padrão inicial de um item (Item | Integração | NCM)
+        # Ex: "74 8302.42.00 193" (Item espaço NCM espaço Codigo)
+        # O padrão abaixo procura: Inicio de linha ou quebra, Digitos (Item), Espaço, NCM, Espaço
+        item_pattern = r'(?:^|\n)(\d+)\s+.*?\s+(\d{4}\.\d{2}\.\d{2})\s+(\d+)\s'
         
-        # MÉTODO 3: Buscar valores próximos aos nomes
-        if 'pis_valor_devido' not in item or item.get('pis_valor_devido', 0) == 0:
-            item['pis_valor_devido'] = self._find_tax_near_text(text, 'PIS')
+        matches = list(re.finditer(item_pattern, text))
         
-        if 'cofins_valor_devido' not in item or item.get('cofins_valor_devido', 0) == 0:
-            item['cofins_valor_devido'] = self._find_tax_near_text(text, 'COFINS')
-        
-        return item
-    
-    def _extract_codigo_interno(self, text: str, item: Dict) -> Dict:
-        """Extrai o código interno (PARTNUMBER) seguindo a mesma lógica dos impostos"""
-        # Padrão robusto para encontrar o código interno
-        codigo_patterns = [
-            # Padrão 1: Formato mais comum
-            r'CÓDIGO INTERNO \(PARTNUMBER\)\s*[\*\-\s]*\n?\s*Código interno\s*\n?\s*([\d\s\.\-]+)',
-            # Padrão 2: Formato alternativo
-            r'CÓDIGO INTERNO[\s\S]*?Código interno[\s\S]*?(\d[\d\s\.\-]+)',
-            # Padrão 3: Busca direta pelo formato conhecido
-            r'(\d{8}\s*[\-\s]+\s*\d{2}\s*[\-\s]+\s*[\d\.]{9})'
-        ]
-        
-        for pattern in codigo_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                codigo = match.group(1).strip()
-                # Limpar espaços extras e formatação
-                codigo = ' '.join(codigo.split())
-                item['codigo_interno'] = codigo
-                break
-        
-        return item
-    
-    def _extract_fabricante_info(self, text: str, item: Dict) -> Dict:
-        """Extrai informações do fabricante/produtor"""
-        
-        # Fabricante Conhecido
-        fabricante_pattern = r'FABRICANTE/PRODUTOR[\s\S]*?Conhecido\s*\n?\s*(SIM|NÃO)'
-        fabricante_match = re.search(fabricante_pattern, text, re.IGNORECASE)
-        if fabricante_match:
-            item['fabricante_conhecido'] = fabricante_match.group(1)
-        
-        # País de Origem
-        pais_pattern = r'Pais Origem\s*\n?\s*DE?\s*([A-ZÀ-Ü\s]+)'
-        pais_match = re.search(pais_pattern, text, re.IGNORECASE)
+        for i, match in enumerate(matches):
+            start = match.start()
+            # O fim deste item é o início do próximo, ou o fim do texto
+            end = matches[i+1].start() if i + 1 < len(matches) else len(text)
+            
+            block_text = text[start:end]
+            
+            # Dados capturados no cabeçalho do item (Item, NCM, Codigo Produto)
+            item_num = match.group(1)
+            ncm = match.group(2)
+            cod_prod_header = match.group(3)
+            
+            item_data = self._extract_fields_from_block(block_text, item_num, ncm, cod_prod_header)
+            if item_data:
+                self.documento['itens'].append(item_data)
+
+        self._calculate_totals()
+
+    def _extract_fields_from_block(self, text: str, item_num: str, ncm: str, cod_header: str) -> Dict:
+        """
+        Extrai dados usando 'âncoras' de texto. Procura o texto entre a chave e a próxima seção.
+        """
+        item = {
+            # Campos Chave
+            'numero_item': item_num,
+            'ncm': ncm,
+            'codigo_produto_duimp': cod_header,
+            
+            # Campos Solicitados (Novos e Corrigidos)
+            'codigo_interno': '',
+            'pais_origem': '',
+            'aplicacao': '',
+            'fatura_invoice': '',
+            'condicao_venda': '',
+            'descricao_completa': '',
+            'marca': '',
+            
+            # Valores Numéricos
+            'quantidade': 0.0,
+            'peso_liquido': 0.0,
+            'valor_total': 0.0,
+            'total_impostos': 0.0,
+            
+            # Impostos Detalhados
+            'ii_valor': 0.0, 'ipi_valor': 0.0, 'pis_valor': 0.0, 'cofins_valor': 0.0,
+            'frete': 0.0, 'seguro': 0.0
+        }
+
+        # --- TÁTICA AVANÇADA DE EXTRAÇÃO (Blocos Multilinha) ---
+
+        # 1. CÓDIGO INTERNO (Correção Crítica)
+        # Procura por "Código interno", pega tudo até chegar em "FABRICANTE" ou "Conhecido"
+        # O re.DOTALL (.) permite que o ponto capture quebras de linha (\n)
+        cod_interno_match = re.search(r'Código interno\s*(.*?)\s*(?:FABRICANTE|Conhecido|Pais)', text, re.IGNORECASE | re.DOTALL)
+        if cod_interno_match:
+            # Limpa quebras de linha e espaços extras do resultado
+            raw_code = cod_interno_match.group(1).replace('\n', '').strip()
+            item['codigo_interno'] = raw_code
+
+        # 2. PAIS DE ORIGEM
+        # Procura "Pais Origem", pega o texto até "CARACTERIZAÇÃO" ou nova linha
+        pais_match = re.search(r'Pais Origem\s*(.*?)\s*(?:CARACTERIZAÇÃO|\n)', text, re.IGNORECASE)
         if pais_match:
             item['pais_origem'] = pais_match.group(1).strip()
-        
-        return item
-    
-    def _extract_descricao_produto(self, text: str, item: Dict) -> Dict:
-        """Extrai denominação e descrição do produto"""
-        
-        # Denominação do Produto
-        denominacao_pattern = r'DENOMINAÇÃO DO PRODUTO\s*\n(.+?)\n'
-        denominacao_match = re.search(denominacao_pattern, text, re.DOTALL | re.IGNORECASE)
-        if denominacao_match:
-            item['denominacao_produto'] = denominacao_match.group(1).strip()
-        
-        # Descrição do Produto
-        descricao_pattern = r'DESCRIÇÃO DO PRODUTO\s*\n(.+?)\n'
-        descricao_match = re.search(descricao_pattern, text, re.DOTALL | re.IGNORECASE)
-        if descricao_match:
-            item['descricao_produto'] = descricao_match.group(1).strip()
-        
-        return item
-    
-    def _extract_condicao_venda_valores(self, text: str, item: Dict) -> Dict:
-        """Extrai valores da condição de venda"""
-        
-        # Método de Valoração
-        metodo_pattern = r'Método de Valoração\s*\n?\s*(.+?)\n'
-        metodo_match = re.search(metodo_pattern, text, re.IGNORECASE)
-        if metodo_match:
-            item['metodo_valoracao'] = metodo_match.group(1).strip()
-        
-        # Condição de Venda
-        cond_pattern = r'Condição de Venda\s*\n?\s*([A-Z]+)\s*-\s*'
-        cond_match = re.search(cond_pattern, text, re.IGNORECASE)
-        if cond_match:
-            item['condicao_venda'] = cond_match.group(1)
-        
-        # Valor Condição Venda em Moeda
-        vlr_moeda_pattern = r'Vlr Cond Venda \(Moeda\)\s*([\d\.,]+)'
-        vlr_moeda_match = re.search(vlr_moeda_pattern, text, re.IGNORECASE)
-        if vlr_moeda_match:
-            item['vlr_cond_venda_moeda'] = self._parse_valor(vlr_moeda_match.group(1))
-        
-        # Valor Condição Venda em R$
-        vlr_rs_pattern = r'Vlr Cond Venda \(R\\\$\)\*\s*([\d\.,]+)'
-        vlr_rs_match = re.search(vlr_rs_pattern, text, re.IGNORECASE)
-        if vlr_rs_match:
-            item['vlr_cond_venda_rs'] = self._parse_valor(vlr_rs_match.group(1))
-        
-        # Frete Internacional
-        frete_pattern = r'Frete Internac\. \(R\\\*\)\*\s*([\d\.,]+)'
-        frete_match = re.search(frete_pattern, text, re.IGNORECASE)
-        if frete_match:
-            item['frete_internacional_rs'] = self._parse_valor(frete_match.group(1))
-        
-        # Seguro Internacional
-        seguro_pattern = r'Seguro Internac\. \(R\\\*\)\s*([\d\.,]+)'
-        seguro_match = re.search(seguro_pattern, text, re.IGNORECASE)
-        if seguro_match:
-            item['seguro_internacional_rs'] = self._parse_valor(seguro_match.group(1))
-        
-        # Local Embarque
-        local_emb_pattern = r'Local Embarque \(R\\\*\)\s*([\d\.,]+)'
-        local_emb_match = re.search(local_emb_pattern, text, re.IGNORECASE)
-        if local_emb_match:
-            item['local_embarque_rs'] = self._parse_valor(local_emb_match.group(1))
-        
-        # Local Aduaneiro
-        local_adu_pattern = r'Local Aduaneiro \(R\\\*\)\s*([\d\.,]+)'
-        local_adu_match = re.search(local_adu_pattern, text, re.IGNORECASE)
-        if local_adu_match:
-            item['local_aduaneiro_rs'] = self._parse_valor(local_adu_match.group(1))
-        
-        return item
-    
-    def _extract_exportador_info(self, text: str, item: Dict) -> Dict:
-        """Extrai informações do exportador"""
-        
-        # Relação Exportador/Fabricante
-        relacao_pattern = r'RELAÇÃO EXPORTADOR E FABRIC\./PRODUTOR\s*\n?\s*(.+?)\n'
-        relacao_match = re.search(relacao_pattern, text, re.IGNORECASE)
-        if relacao_match:
-            item['relacao_exportador_fabricante'] = relacao_match.group(1).strip()
-        
-        # Exportador Estrangeiro
-        exportador_pattern = r'EXPORTADOR ESTRANGEIRO\s*\n?\s*(.+?)\s*-\s*PAIS:'
-        exportador_match = re.search(exportador_pattern, text, re.IGNORECASE)
-        if exportador_match:
-            item['exportador_estrangeiro'] = exportador_match.group(1).strip()
-        
-        # Vinculação
-        vinculacao_pattern = r'VINCULAÇÃO ENTRE COMPRADOR/VENDEDOR\s*\n?\s*(.+?)\n'
-        vinculacao_match = re.search(vinculacao_pattern, text, re.IGNORECASE)
-        if vinculacao_match:
-            item['vinculacao_comprador_vendedor'] = vinculacao_match.group(1).strip()
-        
-        return item
-    
-    def extract_all_from_page(self, page_text: str) -> Dict:
-        """Extrai TODAS as informações de uma página completa"""
-        item = {}
-        
-        # 1. Informações básicas da tabela
-        item.update(self._extract_basic_item_info(page_text))
-        
-        # 2. Descrição do produto
-        item.update(self._extract_descricao_produto(page_text, item))
-        
-        # 3. Código interno (PARTNUMBER) - usando a mesma lógica dos impostos
-        item.update(self._extract_codigo_interno(page_text, item))
-        
-        # 4. Fabricante/Produtor
-        item.update(self._extract_fabricante_info(page_text, item))
-        
-        # 5. Dados da mercadoria
-        item.update(self._extract_dados_mercadoria(page_text, item))
-        
-        # 6. Exportador
-        item.update(self._extract_exportador_info(page_text, item))
-        
-        # 7. Condição de venda e valores
-        item.update(self._extract_condicao_venda_valores(page_text, item))
-        
-        # 8. Impostos (seu código original)
-        item.update(self._extract_taxes_directly(page_text, item))
-        
-        return item
-    
-    def extract_from_all_pages(self, pages_text: List[str]) -> List[Dict]:
-        """Processa todos os itens de todas as páginas"""
-        all_items = []
-        
-        for i, page_text in enumerate(pages_text, 1):
-            print(f"Processando página {i}...")
-            
-            item = self.extract_all_from_page(page_text)
-            
-            # Adiciona índice da página
-            item['pagina'] = i
-            
-            all_items.append(item)
-        
-        print(f"Total de {len(all_items)} itens processados.")
-        return all_items
 
+        # 3. FATURA / INVOICE
+        # Geralmente está na primeira linha ou próximo ao cabeçalho do item
+        # Procura padrão numérico grande próximo a "Fatura" ou no topo
+        invoice_match = re.search(r'Fatura/Invoice\s*([\d\w]+)', text, re.IGNORECASE)
+        if invoice_match:
+            item['fatura_invoice'] = invoice_match.group(1).strip()
 
-# EXEMPLO DE USO:
+        # 4. APLICAÇÃO
+        app_match = re.search(r'Aplicação\s*(.*?)\s*(?:Condição|Qtde)', text, re.IGNORECASE)
+        if app_match:
+            item['aplicacao'] = app_match.group(1).strip()
+
+        # 5. CONDIÇÃO DE VENDA
+        cond_venda_match = re.search(r'Cond\. Venda\s*([A-Z]{3})', text, re.IGNORECASE)
+        if cond_venda_match:
+            item['condicao_venda'] = cond_venda_match.group(1).strip()
+
+        # 6. DESCRIÇÃO E MARCA
+        desc_match = re.search(r'DENOMINACAO DO PRODUTO\s*(.*?)\s*DESCRICAO', text, re.IGNORECASE | re.DOTALL)
+        if desc_match:
+            item['descricao_completa'] = desc_match.group(1).replace('\n', ' ').strip()
+            
+        marca_match = re.search(r'MARCA\s*([^\.]+)', text, re.IGNORECASE)
+        if marca_match:
+            item['marca'] = marca_match.group(1).strip()
+
+        # --- Extração de Valores Numéricos (Mantida e Reforçada) ---
+        
+        # Quantidade
+        qtd_match = re.search(r'Qtde Unid\. Comercial\s+([\d\.,]+)', text)
+        if qtd_match: item['quantidade'] = self._parse_float(qtd_match.group(1))
+
+        # Peso
+        peso_match = re.search(r'Peso Líquido.*?([\d\.,]+)', text)
+        if peso_match: item['peso_liquido'] = self._parse_float(peso_match.group(1))
+
+        # Valor Total (MLE/Mercadoria)
+        vlr_total_match = re.search(r'Valor Tot\. Cond Venda\s+([\d\.,]+)', text)
+        if vlr_total_match: item['valor_total'] = self._parse_float(vlr_total_match.group(1))
+
+        # Frete e Seguro
+        frete_match = re.search(r'Frete Internac\. \(R\$\)\s+([\d\.,]+)', text)
+        if frete_match: item['frete'] = self._parse_float(frete_match.group(1))
+        
+        seguro_match = re.search(r'Seguro Internac\. \(R\$\)\s+([\d\.,]+)', text)
+        if seguro_match: item['seguro'] = self._parse_float(seguro_match.group(1))
+
+        # --- IMPOSTOS (Busca Resiliente) ---
+        # Procura o padrão "Imposto ... Valor Devido (R$) X.XXX,XX"
+        taxes = {
+            'ii_valor': r'II.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
+            'ipi_valor': r'IPI.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
+            'pis_valor': r'PIS.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
+            'cofins_valor': r'COFINS.*?Valor Devido \(R\$\)\s*([\d\.,]+)'
+        }
+        
+        for key, pattern in taxes.items():
+            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+            if match:
+                item[key] = self._parse_float(match.group(1))
+            else:
+                # Fallback: Tenta achar apenas o rótulo do imposto e pega o primeiro número grande depois
+                pass
+
+        item['total_impostos'] = item['ii_valor'] + item['ipi_valor'] + item['pis_valor'] + item['cofins_valor']
+
+        return item
+
+    def _parse_float(self, value_str: str) -> float:
+        if not value_str: return 0.0
+        try:
+            return float(value_str.replace('.', '').replace(',', '.'))
+        except:
+            return 0.0
+
+    def _calculate_totals(self):
+        # Soma simples para dashboard
+        self.documento['totais'] = {
+            'valor_total_mercadoria': sum(i['valor_total'] for i in self.documento['itens']),
+            'total_impostos': sum(i['total_impostos'] for i in self.documento['itens'])
+        }
+
+# --- Interface Streamlit ---
+
+def main():
+    st.markdown('<h1 class="main-header">🚀 Extrator DUIMP/Invoice Pro</h1>', unsafe_allow_html=True)
+    
+    st.info("💡 **Novidades na Versão Pro:** Captura inteligente de Código Interno (Partnumber), Pais de Origem, Aplicação e Invoice, independente da formatação do PDF.")
+
+    uploaded_file = st.sidebar.file_uploader("📂 Arraste seu PDF aqui", type=['pdf'])
+
+    if uploaded_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            tmp.write(uploaded_file.getvalue())
+            tmp_path = tmp.name
+
+        try:
+            parser = AdvancedPDFParser()
+            
+            with st.spinner("🔍 Executando extração avançada..."):
+                doc = parser.parse_pdf(tmp_path)
+            
+            # --- Métricas ---
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value">{len(doc['itens'])}</div>
+                    <div class="metric-label">Itens Extraídos</div>
+                </div>""", unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value">R$ {doc['totais']['valor_total_mercadoria']:,.2f}</div>
+                    <div class="metric-label">Valor Total Mercadoria</div>
+                </div>""", unsafe_allow_html=True)
+            with col3:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value">R$ {doc['totais']['total_impostos']:,.2f}</div>
+                    <div class="metric-label">Total de Impostos</div>
+                </div>""", unsafe_allow_html=True)
+
+            # --- DataFrame ---
+            if doc['itens']:
+                df = pd.DataFrame(doc['itens'])
+                
+                # Seleção e renomeação de colunas para exibição final
+                cols_order = [
+                    'numero_item', 'codigo_interno', 'codigo_produto_duimp', 'descricao_completa', 
+                    'ncm', 'pais_origem', 'aplicacao', 'fatura_invoice', 
+                    'quantidade', 'valor_total', 'total_impostos',
+                    'ii_valor', 'ipi_valor', 'pis_valor', 'cofins_valor'
+                ]
+                
+                # Garante que colunas existem
+                display_cols = [c for c in cols_order if c in df.columns]
+                
+                st.markdown('<h2 class="sub-header">📊 Detalhamento dos Itens</h2>', unsafe_allow_html=True)
+                st.dataframe(
+                    df[display_cols].style.format({
+                        'valor_total': 'R$ {:,.2f}',
+                        'total_impostos': 'R$ {:,.2f}',
+                        'ii_valor': 'R$ {:,.2f}',
+                        'pis_valor': 'R$ {:,.2f}',
+                        'cofins_valor': 'R$ {:,.2f}',
+                        'ipi_valor': 'R$ {:,.2f}',
+                        'quantidade': '{:,.2f}'
+                    }),
+                    use_container_width=True,
+                    height=500
+                )
+
+                # --- Exportação ---
+                csv = df.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+                st.download_button(
+                    label="💾 Baixar Relatório Completo (CSV)",
+                    data=csv,
+                    file_name="extrato_duimp_pro.csv",
+                    mime="text/csv",
+                    type="primary"
+                )
+            else:
+                st.warning("Nenhum item encontrado. Verifique se o PDF está no formato padrão de DUIMP/Invoice.")
+
+        except Exception as e:
+            st.error(f"Erro ao processar: {str(e)}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
 if __name__ == "__main__":
-    # Carregue seus textos das páginas
-    pages_text = [
-        # Texto da página 1
-        """| 74 | ✅ | 8302.42.00 | 193 | 1 | FCA | 110338935 |
-        DENOMINACAO DO PRODUTO
-        CABIDEIRO BÁSICO 12KG EM AÇO PRETO PARA MÓVEIS
-        
-        DESCRICAO DO PRODUTO
-        MARCA CONERO.
-        
-        CÓDIGO INTERNO (PARTNUMBER)
-        Código interno
-        25053315 - 30 - 811.62.363
-        
-        FABRICANTE/PRODUTOR
-        Conhecido
-        NAO
-        Pais Origem
-        DE ALEMANHA
-        
-        DADOS DA MERCADORIA
-        Aplicação
-        REVENDA
-        
-        Condição Mercadoria
-        NOVA
-        
-        Qtde Unid. Estatistica
-        14,27000
-        
-        Unidad Estatistica
-        QUILOGRAMA LIQUIDO
-        
-        Qtde Unid. Comercial
-        2,00000
-        
-        Unidade Comercial
-        UNIDADE
-        
-        Peso Líquido (KG)
-        14,27000
-        
-        Moeda Negociada
-        978 - EURO (EUR)
-        
-        Valor Unit Cond Venda
-        67,5900000
-        
-        Valor Tot. Cond Venda
-        135,18
-        
-        CONDIÇÃO DE VENDA DA MERCADORIA
-        Método de Valoração
-        METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)
-        
-        Condição de Venda
-        FCA - FREE CARRIER
-        
-        Vlr Cond Venda (Moeda)
-        135,18
-        
-        Vlr Cond Venda (R$)*
-        837,18
-        
-        Frete Internac. (R*)*
-        90,65
-        
-        Seguro Internac. (R*)
-        3,25
-        
-        TRIBUTOS DA MERCADORIA - VALORES
-        Local Embarque (R*)
-        837,18
-        
-        Local Aduaneiro (R*)
-        931,08
-        
-        II - Valor Devido (R$)
-        112,45
-        
-        IPI - Valor Devido (R$)
-        15,78
-        
-        PIS - Valor Devido (R$)
-        8,92
-        
-        COFINS - Valor Devido (R$)
-        41,15""",
-        
-        # Adicione mais páginas conforme necessário
-    ]
-    
-    # Cria o extrator e processa
-    extractor = DocumentExtractor()
-    results = extractor.extract_from_all_pages(pages_text)
-    
-    # Exibe os resultados
-    for i, result in enumerate(results, 1):
-        print(f"\n=== ITEM {i} ===")
-        for key, value in result.items():
-            print(f"{key}: {value}")
+    main()
