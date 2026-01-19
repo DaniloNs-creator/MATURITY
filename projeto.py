@@ -152,13 +152,28 @@ class HafelePDFParser:
                 'peso_liquido': 0,
                 'valor_unitario': 0,
                 'valor_total': 0,
-                'local_aduaneiro': 0,       # NOVO CAMPO
+                'local_aduaneiro': 0,
                 'frete_internacional': 0,
                 'seguro_internacional': 0,
+                
+                # Campos de Impostos (Valores)
                 'ii_valor_devido': 0,
                 'ipi_valor_devido': 0,
                 'pis_valor_devido': 0,
                 'cofins_valor_devido': 0,
+                
+                # NOVOS CAMPOS: Base de Cálculo
+                'ii_base_calculo': 0,
+                'ipi_base_calculo': 0,
+                'pis_base_calculo': 0,
+                'cofins_base_calculo': 0,
+                
+                # NOVOS CAMPOS: Alíquotas
+                'ii_aliquota': 0,
+                'ipi_aliquota': 0,
+                'pis_aliquota': 0,
+                'cofins_aliquota': 0,
+                
                 'total_impostos': 0,
                 'valor_total_com_impostos': 0
             }
@@ -170,68 +185,50 @@ class HafelePDFParser:
             if nome_match:
                 item['nome_produto'] = nome_match.group(1).replace('\n', ' ').strip()
             
-            # --- CÓDIGO INTERNO (COM LIMPEZA) ---
+            # Código Interno (Limpo)
             codigo_match = re.search(r'Código interno\s*(.*?)\s*(?=FABRICANTE|Conhecido|Pais)', text, re.IGNORECASE | re.DOTALL)
             if codigo_match:
                 raw_code = codigo_match.group(1)
-                clean_code = raw_code.replace('(PARTNUMBER)', '')
-                clean_code = clean_code.replace('Código interno', '') 
-                clean_code = clean_code.replace('\n', '')
+                clean_code = raw_code.replace('(PARTNUMBER)', '').replace('Código interno', '').replace('\n', '')
                 item['codigo_interno'] = clean_code.strip()
             
-            # País de Origem
+            # Outros campos textuais
             pais_match = re.search(r'Pais Origem\s*(.*?)\s*(?=CARACTERIZAÇÃO|\n)', text, re.IGNORECASE)
-            if pais_match:
-                item['pais_origem'] = pais_match.group(1).strip()
+            if pais_match: item['pais_origem'] = pais_match.group(1).strip()
 
-            # Fatura / Invoice
             fatura_match = re.search(r'Fatura/Invoice\s*([0-9]+)', text, re.IGNORECASE)
-            if fatura_match:
-                item['fatura'] = fatura_match.group(1).strip()
+            if fatura_match: item['fatura'] = fatura_match.group(1).strip()
             
-            # Aplicação
             app_match = re.search(r'Aplicação\s*(.*?)\s*(?=Condição|\n)', text, re.IGNORECASE)
-            if app_match:
-                item['aplicacao'] = app_match.group(1).strip()
+            if app_match: item['aplicacao'] = app_match.group(1).strip()
 
-            # Condição de Venda
             cond_venda_match = re.search(r'Cond\. Venda\s*(.*?)\s*(?=Fatura)', text, re.IGNORECASE)
-            if cond_venda_match:
-                item['condicao_venda'] = cond_venda_match.group(1).strip()
+            if cond_venda_match: item['condicao_venda'] = cond_venda_match.group(1).strip()
 
             # --- SEÇÃO 2: VALORES E QUANTIDADES ---
 
-            # Quantidade
             qtd_match = re.search(r'Qtde Unid\. Comercial\s+([\d\.,]+)', text)
             if qtd_match: item['quantidade'] = self._parse_valor(qtd_match.group(1))
             
-            # Peso
             peso_match = re.search(r'Peso Líquido \(KG\)\s+([\d\.,]+)', text)
             if peso_match: item['peso_liquido'] = self._parse_valor(peso_match.group(1))
             
-            # Valor Unitário
             valor_unit_match = re.search(r'Valor Unit Cond Venda\s+([\d\.,]+)', text)
             if valor_unit_match: item['valor_unitario'] = self._parse_valor(valor_unit_match.group(1))
             
-            # Valor Total
             valor_total_match = re.search(r'Valor Tot\. Cond Venda\s+([\d\.,]+)', text)
             if valor_total_match: item['valor_total'] = self._parse_valor(valor_total_match.group(1))
             
-            # --- LOCAL ADUANEIRO (NOVO) ---
-            # Busca o padrão "Local Aduaneiro (R$) X.XXX,XX"
             loc_adu_match = re.search(r'Local Aduaneiro \(R\$\)\s*([\d\.,]+)', text, re.IGNORECASE)
-            if loc_adu_match:
-                item['local_aduaneiro'] = self._parse_valor(loc_adu_match.group(1))
+            if loc_adu_match: item['local_aduaneiro'] = self._parse_valor(loc_adu_match.group(1))
 
-            # Frete
             frete_match = re.search(r'Frete Internac\. \(R\$\)\s+([\d\.,]+)', text)
             if frete_match: item['frete_internacional'] = self._parse_valor(frete_match.group(1))
             
-            # Seguro
             seguro_match = re.search(r'Seguro Internac\. \(R\$\)\s+([\d\.,]+)', text)
             if seguro_match: item['seguro_internacional'] = self._parse_valor(seguro_match.group(1))
             
-            # --- SEÇÃO 3: IMPOSTOS ---
+            # --- SEÇÃO 3: IMPOSTOS, BASES E ALÍQUOTAS ---
             item = self._extract_taxes_directly(text, item)
             
             # Calcular totais
@@ -251,18 +248,40 @@ class HafelePDFParser:
             return None
     
     def _extract_taxes_directly(self, text: str, item: Dict) -> Dict:
-        """Extrai impostos diretamente do texto"""
-        patterns = {
+        """Extrai impostos, bases e alíquotas diretamente do texto"""
+        
+        # Mapeamento para Valore Devido
+        tax_values = {
             'ii_valor_devido': r'II.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
             'ipi_valor_devido': r'IPI.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
             'pis_valor_devido': r'PIS.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
             'cofins_valor_devido': r'COFINS.*?Valor Devido \(R\$\)\s*([\d\.,]+)'
         }
         
-        for tax_key, pattern in patterns.items():
+        # Mapeamento para Base de Cálculo (Procura 'Base de Cálculo (R$)' logo após o nome do imposto)
+        base_values = {
+            'ii_base_calculo': r'II.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)',
+            'ipi_base_calculo': r'IPI.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)',
+            'pis_base_calculo': r'PIS.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)',
+            'cofins_base_calculo': r'COFINS.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)'
+        }
+
+        # Mapeamento para Alíquotas (Procura '% Alíquota' logo após o nome do imposto)
+        rate_values = {
+            'ii_aliquota': r'II.*?% Alíquota\s*([\d\.,]+)',
+            'ipi_aliquota': r'IPI.*?% Alíquota\s*([\d\.,]+)',
+            'pis_aliquota': r'PIS.*?% Alíquota\s*([\d\.,]+)',
+            'cofins_aliquota': r'COFINS.*?% Alíquota\s*([\d\.,]+)'
+        }
+        
+        # Executa as buscas
+        all_patterns = {**tax_values, **base_values, **rate_values}
+        
+        for key, pattern in all_patterns.items():
+            # re.DOTALL permite que o .*? atravesse linhas para encontrar o valor correspondente ao bloco
             match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
             if match:
-                item[tax_key] = self._parse_valor(match.group(1))
+                item[key] = self._parse_valor(match.group(1))
         
         return item
     
@@ -323,13 +342,26 @@ class FinancialAnalyzer:
                 'Peso (kg)': item.get('peso_liquido', 0),
                 'Valor Unit. (R$)': item.get('valor_unitario', 0),
                 'Valor Total (R$)': item.get('valor_total', 0),
-                'Local Aduaneiro (R$)': item.get('local_aduaneiro', 0), # NOVO CAMPO
+                'Local Aduaneiro (R$)': item.get('local_aduaneiro', 0),
                 'Frete (R$)': item.get('frete_internacional', 0),
                 'Seguro (R$)': item.get('seguro_internacional', 0),
+                
+                # Impostos - Valores
                 'II (R$)': item.get('ii_valor_devido', 0),
                 'IPI (R$)': item.get('ipi_valor_devido', 0),
                 'PIS (R$)': item.get('pis_valor_devido', 0),
                 'COFINS (R$)': item.get('cofins_valor_devido', 0),
+                
+                # NOVAS COLUNAS - Bases e Alíquotas
+                'II Base (R$)': item.get('ii_base_calculo', 0),
+                'II Alíq. (%)': item.get('ii_aliquota', 0),
+                'IPI Base (R$)': item.get('ipi_base_calculo', 0),
+                'IPI Alíq. (%)': item.get('ipi_aliquota', 0),
+                'PIS Base (R$)': item.get('pis_base_calculo', 0),
+                'PIS Alíq. (%)': item.get('pis_aliquota', 0),
+                'COFINS Base (R$)': item.get('cofins_base_calculo', 0),
+                'COFINS Alíq. (%)': item.get('cofins_aliquota', 0),
+                
                 'Total Impostos (R$)': item.get('total_impostos', 0),
                 'Valor c/ Impostos (R$)': item.get('valor_total_com_impostos', 0)
             })
@@ -345,7 +377,7 @@ def main():
     st.markdown("""
     <div class="section-card">
         <strong>🔍 Extração Profissional</strong><br>
-        Sistema ajustado para ler Códigos Internos (Limpos) e Local Aduaneiro.
+        Sistema ajustado para ler Códigos Internos (Limpos), Local Aduaneiro, Bases de Cálculo e Alíquotas.
     </div>
     """, unsafe_allow_html=True)
     
@@ -433,10 +465,14 @@ def main():
             
             st.markdown('<h2 class="sub-header">📦 Lista de Itens Detalhada</h2>', unsafe_allow_html=True)
             
+            # Ordenação das colunas para visualização lógica
             cols_order = [
-                'Item', 'Código Interno', 'Produto', 'Aplicação', 'País Origem', 
-                'Fatura', 'Cond. Venda', 'NCM', 'Quantidade', 
-                'Valor Unit. (R$)', 'Valor Total (R$)', 'Local Aduaneiro (R$)', 'Total Impostos (R$)'
+                'Item', 'Código Interno', 'Produto', 'NCM',
+                'Valor Total (R$)', 'Local Aduaneiro (R$)', 
+                'II Base (R$)', 'II Alíq. (%)', 'II (R$)',
+                'IPI Base (R$)', 'IPI Alíq. (%)', 'IPI (R$)',
+                'PIS Base (R$)', 'PIS Alíq. (%)', 'PIS (R$)',
+                'COFINS Base (R$)', 'COFINS Alíq. (%)', 'COFINS (R$)'
             ]
             
             display_cols = [c for c in cols_order if c in df.columns]
@@ -445,11 +481,15 @@ def main():
             
             display_df = df[final_cols].copy()
             
-            # Inclui o Local Aduaneiro na formatação
-            num_cols = ['Valor Unit. (R$)', 'Valor Total (R$)', 'Local Aduaneiro (R$)', 'Total Impostos (R$)']
-            for c in num_cols:
-                if c in display_df.columns:
-                    display_df[c] = display_df[c].apply(lambda x: f"R$ {x:,.2f}")
+            # Formatação de Moeda
+            currency_cols = [col for col in display_df.columns if '(R$)' in col]
+            for c in currency_cols:
+                display_df[c] = display_df[c].apply(lambda x: f"R$ {x:,.2f}")
+            
+            # Formatação de Porcentagem
+            pct_cols = [col for col in display_df.columns if '(%)' in col]
+            for c in pct_cols:
+                display_df[c] = display_df[c].apply(lambda x: f"{x:,.2f}%")
 
             st.dataframe(
                 display_df,
@@ -466,7 +506,7 @@ def main():
                 st.download_button(
                     label="📥 Baixar CSV (Completo)",
                     data=csv_data,
-                    file_name="itens_hafele_pro.csv",
+                    file_name="itens_hafele_pro_completo.csv",
                     mime="text/csv"
                 )
             
@@ -479,7 +519,7 @@ def main():
                 st.download_button(
                     label="📊 Baixar Excel",
                     data=output.getvalue(),
-                    file_name="itens_hafele_pro.xlsx",
+                    file_name="itens_hafele_pro_completo.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
         
