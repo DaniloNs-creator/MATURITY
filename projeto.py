@@ -27,7 +27,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados (MANTIDOS DO SEU CÓDIGO)
+# Estilos CSS personalizados
 st.markdown("""
 <style>
     .main-header {
@@ -118,7 +118,6 @@ class HafelePDFParser:
         items = []
         
         # Padrão para encontrar início de itens
-        # Procurando: número_item NCM código (ex: "74 8302.42.00 193")
         item_pattern = r'(?:^|\n)(\d+)\s+(\d{4}\.\d{2}\.\d{2})\s+(\d+)\s'
         matches = list(re.finditer(item_pattern, text))
         
@@ -126,7 +125,6 @@ class HafelePDFParser:
         
         for i, match in enumerate(matches):
             start_pos = match.start()
-            # O fim é o início do próximo item ou o fim do texto
             end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             
             item_text = text[start_pos:end_pos]
@@ -146,10 +144,10 @@ class HafelePDFParser:
                 'codigo_produto': codigo,
                 'nome_produto': '',
                 'codigo_interno': '',
-                'pais_origem': '',          # NOVO
-                'aplicacao': '',            # NOVO
-                'fatura': '',               # NOVO
-                'condicao_venda': '',       # NOVO
+                'pais_origem': '',
+                'aplicacao': '',
+                'fatura': '',
+                'condicao_venda': '',
                 'quantidade': 0,
                 'peso_liquido': 0,
                 'valor_unitario': 0,
@@ -164,37 +162,40 @@ class HafelePDFParser:
                 'valor_total_com_impostos': 0
             }
             
-            # --- SEÇÃO 1: TEXTOS E CÓDIGOS (REVISADO PRO) ---
+            # --- SEÇÃO 1: TEXTOS E CÓDIGOS ---
 
-            # Nome do Produto (Multilinha)
+            # Nome do Produto
             nome_match = re.search(r'DENOMINACAO DO PRODUTO\s*\n(.*?)\n(?:DESCRICAO|MARCA)', text, re.IGNORECASE | re.DOTALL)
             if nome_match:
                 item['nome_produto'] = nome_match.group(1).replace('\n', ' ').strip()
             
-            # CÓDIGO INTERNO (CORRIGIDO: Usa lookahead para pegar tudo até "FABRICANTE" ou "Conhecido")
-            # Isso resolve o problema de quebra de linha
+            # --- CÓDIGO INTERNO (COM LIMPEZA) ---
+            # Captura tudo entre "Código interno" e o próximo campo
             codigo_match = re.search(r'Código interno\s*(.*?)\s*(?=FABRICANTE|Conhecido|Pais)', text, re.IGNORECASE | re.DOTALL)
             if codigo_match:
-                # Remove quebras de linha e espaços duplos
-                raw_code = codigo_match.group(1).replace('\n', '').strip()
-                item['codigo_interno'] = raw_code
+                raw_code = codigo_match.group(1)
+                # LIMPEZA DE SUJEIRA
+                clean_code = raw_code.replace('(PARTNUMBER)', '')
+                clean_code = clean_code.replace('Código interno', '') 
+                clean_code = clean_code.replace('\n', '')
+                item['codigo_interno'] = clean_code.strip()
             
-            # PAÍS DE ORIGEM (NOVO)
+            # País de Origem
             pais_match = re.search(r'Pais Origem\s*(.*?)\s*(?=CARACTERIZAÇÃO|\n)', text, re.IGNORECASE)
             if pais_match:
                 item['pais_origem'] = pais_match.group(1).strip()
 
-            # FATURA / INVOICE (NOVO)
+            # Fatura / Invoice
             fatura_match = re.search(r'Fatura/Invoice\s*([0-9]+)', text, re.IGNORECASE)
             if fatura_match:
                 item['fatura'] = fatura_match.group(1).strip()
             
-            # APLICAÇÃO (NOVO)
+            # Aplicação
             app_match = re.search(r'Aplicação\s*(.*?)\s*(?=Condição|\n)', text, re.IGNORECASE)
             if app_match:
                 item['aplicacao'] = app_match.group(1).strip()
 
-            # CONDIÇÃO DE VENDA (NOVO)
+            # Condição de Venda
             cond_venda_match = re.search(r'Cond\. Venda\s*(.*?)\s*(?=Fatura)', text, re.IGNORECASE)
             if cond_venda_match:
                 item['condicao_venda'] = cond_venda_match.group(1).strip()
@@ -225,7 +226,7 @@ class HafelePDFParser:
             seguro_match = re.search(r'Seguro Internac\. \(R\$\)\s+([\d\.,]+)', text)
             if seguro_match: item['seguro_internacional'] = self._parse_valor(seguro_match.group(1))
             
-            # --- SEÇÃO 3: IMPOSTOS (MANTIDO O MÉTODO ROBUSTO DO CÓDIGO ANTERIOR) ---
+            # --- SEÇÃO 3: IMPOSTOS ---
             item = self._extract_taxes_directly(text, item)
             
             # Calcular totais
@@ -253,7 +254,6 @@ class HafelePDFParser:
             'cofins_valor_devido': r'COFINS.*?Valor Devido \(R\$\)\s*([\d\.,]+)'
         }
         
-        # Tenta buscar pelo padrão específico primeiro (Mais seguro)
         for tax_key, pattern in patterns.items():
             match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
             if match:
@@ -293,7 +293,7 @@ class HafelePDFParser:
             return 0.0
 
 class FinancialAnalyzer:
-    """Analisador financeiro simples (ATUALIZADO PARA NOVOS CAMPOS)"""
+    """Analisador financeiro"""
     
     def __init__(self, documento: Dict):
         self.documento = documento
@@ -308,12 +308,12 @@ class FinancialAnalyzer:
                 'Item': item.get('numero_item', ''),
                 'NCM': item.get('ncm', ''),
                 'Código Produto': item.get('codigo_produto', ''),
-                'Código Interno': item.get('codigo_interno', ''), # AGORA CORRIGIDO
+                'Código Interno': item.get('codigo_interno', ''),
                 'Produto': item.get('nome_produto', ''),
-                'Aplicação': item.get('aplicacao', ''),           # NOVO
-                'País Origem': item.get('pais_origem', ''),       # NOVO
-                'Fatura': item.get('fatura', ''),                 # NOVO
-                'Cond. Venda': item.get('condicao_venda', ''),    # NOVO
+                'Aplicação': item.get('aplicacao', ''),
+                'País Origem': item.get('pais_origem', ''),
+                'Fatura': item.get('fatura', ''),
+                'Cond. Venda': item.get('condicao_venda', ''),
                 'Quantidade': item.get('quantidade', 0),
                 'Peso (kg)': item.get('peso_liquido', 0),
                 'Valor Unit. (R$)': item.get('valor_unitario', 0),
@@ -332,19 +332,17 @@ class FinancialAnalyzer:
         return self.itens_df
 
 def main():
-    """Função principal (MANTIDA SUA ESTRUTURA VISUAL)"""
+    """Função principal"""
     
-    # Cabeçalho
     st.markdown('<h1 class="main-header">🏭 Sistema de Análise de Extratos Häfele (PRO)</h1>', unsafe_allow_html=True)
     
     st.markdown("""
     <div class="section-card">
         <strong>🔍 Extração Profissional</strong><br>
-        Sistema ajustado para ler Códigos Internos complexos e novos campos de Fatura/Aplicação.
+        Sistema ajustado para ler Códigos Internos (Partnumber) e campos fiscais.
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar
     with st.sidebar:
         st.markdown("### 📁 Upload do Documento")
         
@@ -361,26 +359,21 @@ def main():
             st.info(f"📄 Arquivo: {uploaded_file.name}")
             st.success(f"📊 Tamanho: {file_size:.2f} MB")
     
-    # Processamento principal
     if uploaded_file is not None:
         try:
-            # Salvar arquivo temporariamente
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
                 tmp_path = tmp_file.name
             
-            # Progresso
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # Etapa 1: Parsing
             status_text.text("📄 Analisando documento PDF...")
             progress_bar.progress(30)
             
             parser = HafelePDFParser()
             documento = parser.parse_pdf(tmp_path)
             
-            # Etapa 2: Análise
             status_text.text("📊 Processando dados...")
             progress_bar.progress(60)
             
@@ -390,17 +383,14 @@ def main():
             progress_bar.progress(100)
             status_text.text("✅ Processamento concluído!")
             
-            # Limpar arquivo
             try:
                 os.unlink(tmp_path)
             except:
                 pass
             
-            # Informações do processamento
             totais = documento['totais']
             st.success(f"✅ **{len(documento['itens'])} itens** extraídos com sucesso!")
             
-            # Métricas principais
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
@@ -435,25 +425,20 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Tabela de itens
             st.markdown('<h2 class="sub-header">📦 Lista de Itens Detalhada</h2>', unsafe_allow_html=True)
             
-            # Reorganizar colunas para mostrar os novos campos primeiro
             cols_order = [
                 'Item', 'Código Interno', 'Produto', 'Aplicação', 'País Origem', 
                 'Fatura', 'Cond. Venda', 'NCM', 'Quantidade', 
                 'Valor Unit. (R$)', 'Valor Total (R$)', 'Total Impostos (R$)'
             ]
             
-            # Garante que só pegamos colunas que existem no DF
             display_cols = [c for c in cols_order if c in df.columns]
-            # Adiciona o resto das colunas no final
             remaining_cols = [c for c in df.columns if c not in display_cols]
             final_cols = display_cols + remaining_cols
             
             display_df = df[final_cols].copy()
             
-            # Formatar para exibição
             num_cols = ['Valor Unit. (R$)', 'Valor Total (R$)', 'Total Impostos (R$)']
             for c in num_cols:
                 if c in display_df.columns:
@@ -465,7 +450,6 @@ def main():
                 height=600
             )
             
-            # Exportação
             st.markdown('<h2 class="sub-header">💾 Exportação</h2>', unsafe_allow_html=True)
             
             col1, col2 = st.columns(2)
