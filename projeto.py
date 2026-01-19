@@ -152,6 +152,7 @@ class HafelePDFParser:
                 'peso_liquido': 0,
                 'valor_unitario': 0,
                 'valor_total': 0,
+                'local_aduaneiro': 0,       # NOVO CAMPO
                 'frete_internacional': 0,
                 'seguro_internacional': 0,
                 'ii_valor_devido': 0,
@@ -170,11 +171,9 @@ class HafelePDFParser:
                 item['nome_produto'] = nome_match.group(1).replace('\n', ' ').strip()
             
             # --- CÓDIGO INTERNO (COM LIMPEZA) ---
-            # Captura tudo entre "Código interno" e o próximo campo
             codigo_match = re.search(r'Código interno\s*(.*?)\s*(?=FABRICANTE|Conhecido|Pais)', text, re.IGNORECASE | re.DOTALL)
             if codigo_match:
                 raw_code = codigo_match.group(1)
-                # LIMPEZA DE SUJEIRA
                 clean_code = raw_code.replace('(PARTNUMBER)', '')
                 clean_code = clean_code.replace('Código interno', '') 
                 clean_code = clean_code.replace('\n', '')
@@ -218,6 +217,12 @@ class HafelePDFParser:
             valor_total_match = re.search(r'Valor Tot\. Cond Venda\s+([\d\.,]+)', text)
             if valor_total_match: item['valor_total'] = self._parse_valor(valor_total_match.group(1))
             
+            # --- LOCAL ADUANEIRO (NOVO) ---
+            # Busca o padrão "Local Aduaneiro (R$) X.XXX,XX"
+            loc_adu_match = re.search(r'Local Aduaneiro \(R\$\)\s*([\d\.,]+)', text, re.IGNORECASE)
+            if loc_adu_match:
+                item['local_aduaneiro'] = self._parse_valor(loc_adu_match.group(1))
+
             # Frete
             frete_match = re.search(r'Frete Internac\. \(R\$\)\s+([\d\.,]+)', text)
             if frete_match: item['frete_internacional'] = self._parse_valor(frete_match.group(1))
@@ -318,6 +323,7 @@ class FinancialAnalyzer:
                 'Peso (kg)': item.get('peso_liquido', 0),
                 'Valor Unit. (R$)': item.get('valor_unitario', 0),
                 'Valor Total (R$)': item.get('valor_total', 0),
+                'Local Aduaneiro (R$)': item.get('local_aduaneiro', 0), # NOVO CAMPO
                 'Frete (R$)': item.get('frete_internacional', 0),
                 'Seguro (R$)': item.get('seguro_internacional', 0),
                 'II (R$)': item.get('ii_valor_devido', 0),
@@ -339,7 +345,7 @@ def main():
     st.markdown("""
     <div class="section-card">
         <strong>🔍 Extração Profissional</strong><br>
-        Sistema ajustado para ler Códigos Internos (Partnumber) e campos fiscais.
+        Sistema ajustado para ler Códigos Internos (Limpos) e Local Aduaneiro.
     </div>
     """, unsafe_allow_html=True)
     
@@ -430,7 +436,7 @@ def main():
             cols_order = [
                 'Item', 'Código Interno', 'Produto', 'Aplicação', 'País Origem', 
                 'Fatura', 'Cond. Venda', 'NCM', 'Quantidade', 
-                'Valor Unit. (R$)', 'Valor Total (R$)', 'Total Impostos (R$)'
+                'Valor Unit. (R$)', 'Valor Total (R$)', 'Local Aduaneiro (R$)', 'Total Impostos (R$)'
             ]
             
             display_cols = [c for c in cols_order if c in df.columns]
@@ -439,7 +445,8 @@ def main():
             
             display_df = df[final_cols].copy()
             
-            num_cols = ['Valor Unit. (R$)', 'Valor Total (R$)', 'Total Impostos (R$)']
+            # Inclui o Local Aduaneiro na formatação
+            num_cols = ['Valor Unit. (R$)', 'Valor Total (R$)', 'Local Aduaneiro (R$)', 'Total Impostos (R$)']
             for c in num_cols:
                 if c in display_df.columns:
                     display_df[c] = display_df[c].apply(lambda x: f"R$ {x:,.2f}")
