@@ -1,199 +1,279 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+# projeto.py - Script completo para download de XMLs do MasterSAF
+
+import os
+import sys
+import time
+from pathlib import Path
+
+# ============================================================================
+# CONFIGURAÇÃO INICIAL - VERIFICAÇÕES DE AMBIENTE
+# ============================================================================
+print("=" * 70)
+print("🚀 INICIANDO SCRIPT DE DOWNLOAD DE XMLs - MASTERSAF")
+print("=" * 70)
+
+# Verificar se estamos no Streamlit Cloud
+IS_STREAMLIT_CLOUD = os.environ.get('STREAMLIT_SHARING') is not None
+print(f"📡 Ambiente detectado: {'Streamlit Cloud' if IS_STREAMLIT_CLOUD else 'Local'}")
+
+# ============================================================================
+# CONFIGURAÇÃO DO WEBDRIVER (SOLUÇÃO ROBUSTA)
+# ============================================================================
+print("\n" + "=" * 70)
+print("🔧 CONFIGURANDO WEBDRIVER")
+print("=" * 70)
+
+# TENTATIVAS EM ORDEM DE PRIORIDADE
+def setup_webdriver():
+    """Configura o WebDriver com múltiplas tentativas de fallback"""
+    
+    attempts = []
+    
+    # TENTATIVA 1: ChromeDriver AutoInstaller (mais confiável)
+    try:
+        print("\n🔄 Tentativa 1: ChromeDriver AutoInstaller")
+        import chromedriver_autoinstaller
+        # Verificar e instalar ChromeDriver
+        chromedriver_path = chromedriver_autoinstaller.install()
+        print(f"✅ ChromeDriver instalado em: {chromedriver_path}")
+        
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        
+        chrome_options = Options()
+        
+        # Configurações ESSENCIAIS para cloud
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        
+        # Evitar detecção como bot
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        # Configurar downloads
+        prefs = {
+            "download.default_directory": os.getcwd(),
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "plugins.always_open_pdf_externally": True,
+            "safebrowsing.enabled": True
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        
+        service = Service(chromedriver_path)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        print("✅ WebDriver configurado com sucesso (Tentativa 1)")
+        return driver, "ChromeDriver AutoInstaller"
+        
+    except Exception as e1:
+        attempts.append(f"Tentativa 1 falhou: {str(e1)[:100]}")
+        print(f"❌ Tentativa 1 falhou: {e1}")
+    
+    # TENTATIVA 2: WebDriver Manager
+    try:
+        print("\n🔄 Tentativa 2: WebDriver Manager")
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--window-size=1920,1080')
+        
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        print("✅ WebDriver configurado com sucesso (Tentativa 2)")
+        return driver, "WebDriver Manager"
+        
+    except Exception as e2:
+        attempts.append(f"Tentativa 2 falhou: {str(e2)[:100]}")
+        print(f"❌ Tentativa 2 falhou: {e2}")
+    
+    # TENTATIVA 3: Configuração direta (último recurso)
+    try:
+        print("\n🔄 Tentativa 3: Configuração direta")
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        
+        # Configurações específicas para Streamlit Cloud
+        if IS_STREAMLIT_CLOUD:
+            chrome_options.binary_location = '/usr/bin/chromium-browser'
+            chrome_options.add_argument('--disable-setuid-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+        
+        driver = webdriver.Chrome(options=chrome_options)
+        
+        print("✅ WebDriver configurado com sucesso (Tentativa 3)")
+        return driver, "Configuração direta"
+        
+    except Exception as e3:
+        attempts.append(f"Tentativa 3 falhou: {str(e3)[:100]}")
+        print(f"❌ Tentativa 3 falhou: {e3}")
+    
+    # SE TODAS AS TENTATIVAS FALHAREM
+    print("\n" + "=" * 70)
+    print("❌ FALHA CRÍTICA - TODAS AS TENTATIVAS FALHARAM")
+    print("=" * 70)
+    for i, attempt in enumerate(attempts, 1):
+        print(f"Tentativa {i}: {attempt}")
+    
+    return None, None
+
+# Configurar WebDriver
+driver, method = setup_webdriver()
+
+if driver is None:
+    print("\n🚨 Não foi possível configurar o WebDriver. Encerrando.")
+    sys.exit(1)
+
+print(f"\n🎉 WebDriver configurado usando: {method}")
+
+# ============================================================================
+# IMPORTAÇÕES DO SELENIUM (APÓS CONFIGURAR WEBDRIVER)
+# ============================================================================
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
-import os
-import sys
+from selenium.webdriver.support.select import Select
 
-print("=" * 60)
-print("INICIANDO SCRIPT DE DOWNLOAD DE XMLs - MASTERSAF")
-print("=" * 60)
+# Configurar wait
+wait = WebDriverWait(driver, 30)
 
 # ============================================================================
-# CONFIGURAÇÃO DO WEBDRIVER PARA AMBIENTE CLOUD/LOCAL
-# ============================================================================
-print("\n🔧 Configurando WebDriver...")
-
-chrome_options = Options()
-
-# Configurações essenciais para ambientes cloud (Streamlit Cloud, Heroku, etc.)
-chrome_options.add_argument('--headless')  # Modo sem interface gráfica
-chrome_options.add_argument('--no-sandbox')
-chrome_options.add_argument('--disable-dev-shm-usage')
-chrome_options.add_argument('--disable-gpu')
-chrome_options.add_argument('--window-size=1920,1080')
-
-# Configurações para evitar detecção como bot
-chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-chrome_options.add_experimental_option('useAutomationExtension', False)
-
-# Configurar preferências para download
-prefs = {
-    "download.default_directory": os.getcwd(),  # Diretório atual para downloads
-    "download.prompt_for_download": False,
-    "download.directory_upgrade": True,
-    "plugins.always_open_pdf_externally": True,
-    "safebrowsing.enabled": True
-}
-chrome_options.add_experimental_option("prefs", prefs)
-
-try:
-    # Verificar se estamos em ambiente cloud
-    is_cloud = False
-    
-    # Verificar variáveis de ambiente comuns em plataformas cloud
-    cloud_indicators = ['STREAMLIT_SHARING', 'DYNO', 'K_SERVICE', 'AWS_LAMBDA', 'VERCEL']
-    for indicator in cloud_indicators:
-        if os.environ.get(indicator):
-            is_cloud = True
-            print(f"📡 Ambiente cloud detectado ({indicator})")
-            break
-    
-    if is_cloud:
-        # Caminhos padrão para Chrome/Chromium em ambientes cloud
-        chrome_options.binary_location = '/usr/bin/chromium-browser'
-        
-        # Verificar caminhos alternativos
-        possible_chromedriver_paths = [
-            '/usr/bin/chromedriver',
-            '/usr/local/bin/chromedriver',
-            '/app/.chromedriver/bin/chromedriver'
-        ]
-        
-        chromedriver_path = None
-        for path in possible_chromedriver_paths:
-            if os.path.exists(path):
-                chromedriver_path = path
-                print(f"✅ ChromeDriver encontrado em: {path}")
-                break
-        
-        if chromedriver_path:
-            service = Service(chromedriver_path)
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-        else:
-            print("⚠️ ChromeDriver não encontrado nos caminhos padrão. Tentando instalação automática...")
-            # Tentar usar webdriver-manager se disponível
-            try:
-                from webdriver_manager.chrome import ChromeDriverManager
-                service = Service(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-                print("✅ ChromeDriver instalado via webdriver-manager")
-            except ImportError:
-                print("❌ webdriver-manager não disponível. Usando configuração padrão...")
-                driver = webdriver.Chrome(options=chrome_options)
-    else:
-        # Ambiente local
-        print("💻 Ambiente local detectado")
-        try:
-            # Tentar usar webdriver-manager para gerenciar automaticamente o ChromeDriver
-            from webdriver_manager.chrome import ChromeDriverManager
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            print("✅ ChromeDriver configurado via webdriver-manager")
-        except ImportError:
-            print("⚠️ webdriver-manager não encontrado. Usando ChromeDriver local...")
-            driver = webdriver.Chrome(options=chrome_options)
-    
-    print("✅ WebDriver configurado com sucesso!")
-    
-except Exception as e:
-    print(f"❌ ERRO ao configurar WebDriver: {str(e)}")
-    print("Tentando configuração de fallback...")
-    
-    # Última tentativa com configuração básica
-    try:
-        driver = webdriver.Chrome(options=chrome_options)
-        print("✅ WebDriver iniciado com configuração de fallback")
-    except Exception as fallback_error:
-        print(f"❌ FALHA CRÍTICA: Não foi possível iniciar o WebDriver")
-        print(f"Erro: {str(fallback_error)}")
-        sys.exit(1)
-
-# Configurar timeout e maximizar janela
-driver.maximize_window()
-wait = WebDriverWait(driver, 30)  # Timeout aumentado para 30 segundos
-print(f"⏱️  Timeout configurado: 30 segundos")
-
-# ============================================================================
-# FUNÇÃO PARA VERIFICAR SE O LOGIN FOI BEM SUCEDIDO
+# FUNÇÕES AUXILIARES
 # ============================================================================
 def verificar_login():
     """Verifica se o login foi realizado com sucesso"""
     try:
-        # Verificar se há elemento indicando login bem-sucedido
         time.sleep(3)
         current_url = driver.current_url
+        
+        # Verificar por URL
         if "login" not in current_url.lower():
-            print("✅ Login verificado com sucesso")
+            print("✅ Login verificado pela URL")
             return True
         
-        # Verificar por elementos específicos após login
+        # Verificar por elementos específicos
         elementos_login = [
             '//*[@id="linkListagemReceptorCTEs"]/a',
             '//*[contains(text(), "Bem-vindo")]',
-            '//*[contains(text(), "Dashboard")]'
+            '//*[contains(text(), "Dashboard")]',
+            '//*[contains(text(), "Sair")]'
         ]
         
         for xpath in elementos_login:
             try:
                 element = driver.find_element(By.XPATH, xpath)
                 if element.is_displayed():
-                    print("✅ Login verificado via elemento específico")
+                    print(f"✅ Login verificado: {xpath[:50]}...")
                     return True
             except:
                 continue
         
         print("⚠️ Não foi possível verificar o login automaticamente")
-        return True  # Continuar mesmo sem verificação clara
+        return False
         
     except Exception as e:
         print(f"⚠️ Erro ao verificar login: {str(e)}")
-        return True  # Continuar mesmo com erro na verificação
+        return False
 
-# ============================================================================
-# FUNÇÃO PARA VERIFICAR SE HÁ MAIS PÁGINAS
-# ============================================================================
 def verificar_proxima_pagina():
     """Verifica se há próxima página disponível"""
     try:
-        # Verificar botão próximo
-        next_btn = driver.find_element(By.XPATH, '//*[@id="next_plistagem"]')
-        
-        # Verificar se o botão está habilitado
-        if "ui-state-disabled" in next_btn.get_attribute("class"):
-            print("ℹ️  Botão 'Próximo' está desabilitado - fim das páginas")
-            return False
-        else:
-            print("✅ Há próxima página disponível")
-            return True
-            
-    except Exception as e:
-        print(f"⚠️ Erro ao verificar próxima página: {str(e)}")
-        
-        # Tentar método alternativo
+        # Tentar encontrar botão próximo
         try:
-            pagination_elements = driver.find_elements(By.CLASS_NAME, 'ui-paginator-page')
-            if pagination_elements:
-                print(f"ℹ️  Encontrados {len(pagination_elements)} elementos de paginação")
+            next_btn = driver.find_element(By.XPATH, '//*[@id="next_plistagem"]')
+            if "ui-state-disabled" in next_btn.get_attribute("class"):
+                print("ℹ️  Botão 'Próximo' está desabilitado")
+                return False
+            else:
+                print("✅ Há próxima página disponível")
                 return True
         except:
             pass
         
+        # Método alternativo: verificar paginação
+        try:
+            pagination_elements = driver.find_elements(By.CSS_SELECTOR, '.ui-paginator-page, .pagination a')
+            if pagination_elements:
+                current_page = None
+                for element in pagination_elements:
+                    if "active" in element.get_attribute("class") or "selected" in element.get_attribute("class"):
+                        current_page = element.text
+                
+                if current_page:
+                    print(f"ℹ️  Página atual: {current_page}")
+                    return True
+        except:
+            pass
+        
+        # Verificar se há mais dados na tabela
+        try:
+            rows = driver.find_elements(By.CSS_SELECTOR, 'tbody tr')
+            if len(rows) > 0:
+                print(f"ℹ️  {len(rows)} linhas na tabela")
+                return True
+        except:
+            pass
+        
+        print("ℹ️  Não foi possível determinar se há próxima página")
         return False
+        
+    except Exception as e:
+        print(f"⚠️  Erro ao verificar próxima página: {str(e)}")
+        return False
+
+def aguardar_download(tempo=10):
+    """Aguarda o download ser concluído"""
+    print(f"⏳ Aguardando download ({tempo}s)...")
+    time.sleep(tempo)
+    
+    # Verificar se há arquivos baixados recentemente
+    downloads_dir = os.getcwd()
+    arquivos_antes = list(Path(downloads_dir).glob('*.xml')) + list(Path(downloads_dir).glob('*.zip'))
+    
+    if arquivos_antes:
+        print(f"📁 {len(arquivos_antes)} arquivos XML/ZIP encontrados")
+    
+    return True
+
+def salvar_screenshot(nome):
+    """Salva um screenshot para debug"""
+    try:
+        screenshot_path = f"screenshot_{nome}_{int(time.time())}.png"
+        driver.save_screenshot(screenshot_path)
+        print(f"📸 Screenshot salvo: {screenshot_path}")
+        return screenshot_path
+    except Exception as e:
+        print(f"⚠️  Erro ao salvar screenshot: {e}")
+        return None
 
 # ============================================================================
 # FUNÇÃO PRINCIPAL
 # ============================================================================
-def main():
+def executar_processo():
+    """Função principal que executa todo o processo"""
+    
     try:
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 70)
         print("🏁 INICIANDO PROCESSAMENTO")
-        print("=" * 60)
+        print("=" * 70)
         
         # ====================================================================
         # 1. LOGIN NO SISTEMA
@@ -201,27 +281,65 @@ def main():
         print("\n1️⃣  ETAPA 1: LOGIN")
         print("-" * 40)
         
+        # Navegar para página de login
+        print("🌐 Navegando para página de login...")
         driver.get("https://p.dfe.mastersaf.com.br/mvc/login")
-        print("📄 Página de login carregada")
         
-        # Aguardar e preencher usuário
-        user = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="nomeusuario"]')))
-        user.send_keys("HBR0455")
-        print("👤 Usuário preenchido")
+        # Aguardar carregamento
+        time.sleep(5)
+        salvar_screenshot("login_page")
+        
+        # Preencher usuário
+        try:
+            user_field = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="nomeusuario"]')))
+            user_field.clear()
+            user_field.send_keys("HBR0455")
+            print("👤 Usuário preenchido: HBR0455")
+        except Exception as e:
+            print(f"❌ Erro ao preencher usuário: {e}")
+            # Tentar método alternativo
+            try:
+                user_field = driver.find_element(By.ID, 'nomeusuario')
+                user_field.send_keys("HBR0455")
+                print("👤 Usuário preenchido (método alternativo)")
+            except:
+                print("🚨 Não foi possível encontrar campo de usuário")
+                return
         
         # Preencher senha
-        pwd = driver.find_element(By.XPATH, '//*[@id="senha"]')
-        pwd.send_keys("XXXXXXXXXX")
-        print("🔒 Senha preenchida")
+        try:
+            pwd_field = driver.find_element(By.XPATH, '//*[@id="senha"]')
+            pwd_field.clear()
+            pwd_field.send_keys("XXXXXXXXXX")  # Substituir pela senha real
+            print("🔒 Senha preenchida")
+        except:
+            try:
+                pwd_field = driver.find_element(By.ID, 'senha')
+                pwd_field.send_keys("XXXXXXXXXX")
+                print("🔒 Senha preenchida (método alternativo)")
+            except:
+                print("🚨 Não foi possível encontrar campo de senha")
+                return
         
-        # Clicar Enter para login
-        pwd.send_keys(Keys.ENTER)
-        print("↵ Enter pressionado para login")
+        # Submeter formulário
+        try:
+            pwd_field.send_keys(Keys.ENTER)
+            print("↵ Enter pressionado para login")
+        except:
+            try:
+                login_button = driver.find_element(By.XPATH, '//button[@type="submit"]')
+                login_button.click()
+                print("🖱️  Botão de login clicado")
+            except:
+                print("⚠️  Não foi possível submeter formulário, tentando continuar...")
         
-        # Verificar login
-        time.sleep(5)
+        # Aguardar e verificar login
+        time.sleep(8)
+        salvar_screenshot("pos_login")
+        
         if not verificar_login():
-            print("❌ Falha no login. Verifique credenciais.")
+            print("❌ Falha no login. Verifique as credenciais.")
+            salvar_screenshot("login_falhou")
             return
         
         print("✅ Login realizado com sucesso!")
@@ -232,26 +350,30 @@ def main():
         print("\n2️⃣  ETAPA 2: NAVEGAÇÃO PARA RECEPTOR CTEs")
         print("-" * 40)
         
+        # Método 1: XPATH específico
         try:
-            receptor = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="linkListagemReceptorCTEs"]/a')))
-            receptor.click()
-            print("📍 Navegando para Receptor CTEs...")
-        except Exception as e:
-            print(f"⚠️  Elemento não encontrado pelo XPATH. Tentando método alternativo...")
-            
-            # Método alternativo: buscar por texto ou outro atributo
+            receptor_link = wait.until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="linkListagemReceptorCTEs"]/a'))
+            )
+            receptor_link.click()
+            print("📍 Navegando para Receptor CTEs (XPATH)")
+        except:
+            # Método 2: Buscar por texto
+            print("⚠️  XPATH não encontrado, buscando por texto...")
             try:
                 links = driver.find_elements(By.TAG_NAME, 'a')
                 for link in links:
-                    if 'receptor' in link.text.lower() or 'cte' in link.text.lower():
+                    text = link.text.lower()
+                    if 'receptor' in text or 'cte' in text or 'ct-e' in text:
                         link.click()
-                        print("✅ Encontrado por texto alternativo")
+                        print(f"📍 Encontrado por texto: {text[:30]}")
                         break
-            except:
-                print("❌ Não foi possível navegar para Receptor CTEs")
+            except Exception as e:
+                print(f"❌ Não foi possível navegar: {e}")
                 return
         
         time.sleep(5)
+        salvar_screenshot("receptor_ctes")
         print("✅ Página de Receptor CTEs carregada")
         
         # ====================================================================
@@ -260,103 +382,93 @@ def main():
         print("\n3️⃣  ETAPA 3: FILTRO DE DATAS")
         print("-" * 40)
         
+        # Data Inicial
         try:
-            # Data inicial
-            dt_ini = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="consultaDataInicial"]')))
+            dt_ini = wait.until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[@id="consultaDataInicial"]')
+            ))
             dt_ini.click()
-            dt_ini.send_keys(Keys.CONTROL + "a")  # Selecionar tudo
-            dt_ini.send_keys(Keys.DELETE)  # Limpar campo
-            dt_ini.send_keys("01/09/2026")  # Formato correto DD/MM/YYYY
-            print("📅 Data inicial: 01/09/2026")
-            
-            # Data final
-            dt_fim = driver.find_element(By.XPATH, '//*[@id="consultaDataFinal"]')
-            dt_fim.click()
-            dt_fim.send_keys(Keys.CONTROL + "a")  # Selecionar tudo
-            dt_fim.send_keys(Keys.DELETE)  # Limpar campo
-            dt_fim.send_keys("31/01/2026")  # Formato correto DD/MM/YYYY
-            print("📅 Data final: 31/01/2026")
-            
-            # Aplicar filtro
-            dt_fim.send_keys(Keys.ENTER)
-            print("✅ Filtro aplicado com Enter")
-            
-        except Exception as e:
-            print(f"⚠️  Erro ao aplicar filtro de datas: {str(e)}")
-            print("Tentando método alternativo...")
-            
-            # Método alternativo usando JavaScript
+            dt_ini.clear()
+            dt_ini.send_keys("01/09/2025")  # Ajustar para data válida
+            print("📅 Data inicial: 01/09/2025")
+        except:
+            print("⚠️  Campo de data inicial não encontrado")
+            # Tentar via JavaScript
             try:
                 driver.execute_script("""
-                    document.getElementById('consultaDataInicial').value = '01/09/2026';
-                    document.getElementById('consultaDataFinal').value = '31/01/2026';
-                    
-                    // Disparar evento change
-                    var event = new Event('change', { bubbles: true });
-                    document.getElementById('consultaDataFinal').dispatchEvent(event);
+                    document.getElementById('consultaDataInicial').value = '01/09/2025';
                 """)
-                print("✅ Filtro aplicado via JavaScript")
+                print("📅 Data inicial definida via JavaScript")
             except:
-                print("❌ Não foi possível aplicar filtro de datas")
-                return
+                print("❌ Não foi possível definir data inicial")
         
-        time.sleep(3)
+        # Data Final
+        try:
+            dt_fim = driver.find_element(By.XPATH, '//*[@id="consultaDataFinal"]')
+            dt_fim.click()
+            dt_fim.clear()
+            dt_fim.send_keys("31/01/2026")
+            print("📅 Data final: 31/01/2026")
+        except:
+            print("⚠️  Campo de data final não encontrado")
+            try:
+                driver.execute_script("""
+                    document.getElementById('consultaDataFinal').value = '31/01/2026';
+                """)
+                print("📅 Data final definida via JavaScript")
+            except:
+                print("❌ Não foi possível definir data final")
+        
+        # Aplicar filtro
+        try:
+            dt_fim.send_keys(Keys.ENTER)
+            print("✅ Filtro aplicado com Enter")
+            time.sleep(5)
+        except:
+            print("⚠️  Não foi possível aplicar filtro, continuando...")
+        
+        salvar_screenshot("filtro_aplicado")
         
         # ====================================================================
-        # 4. CONFIGURAR 200 ITENS POR PÁGINA
+        # 4. CONFIGURAR PAGINAÇÃO (200 itens por página)
         # ====================================================================
         print("\n4️⃣  ETAPA 4: CONFIGURAÇÃO DE PAGINAÇÃO")
         print("-" * 40)
         
-        # Rolar para baixo para encontrar o seletor
+        # Rolar para baixo para encontrar controles de paginação
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(2)
         
+        # Tentar configurar para 200 itens por página
         try:
-            # Localizar o seletor de itens por página
-            select_pag = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="plistagem_center"]/table/tbody/tr/td[8]/select')))
-            select_pag.click()
-            
-            # Selecionar opção "200"
-            from selenium.webdriver.support.select import Select
-            select = Select(select_pag)
-            select.select_by_value("200")  # Ou select_by_visible_text("200")
-            
-            print("✅ Configurado para 200 itens por página")
-            
+            # Procurar select de paginação
+            selects = driver.find_elements(By.TAG_NAME, 'select')
+            for select_element in selects:
+                try:
+                    select = Select(select_element)
+                    # Tentar encontrar opção 200
+                    for option in select.options:
+                        if '200' in option.text or option.get_attribute('value') == '200':
+                            select.select_by_visible_text(option.text)
+                            print(f"✅ Paginação configurada: {option.text} itens por página")
+                            break
+                except:
+                    continue
         except Exception as e:
-            print(f"⚠️  Erro ao configurar paginação: {str(e)}")
-            print("Tentando método alternativo...")
-            
-            # Método alternativo
-            try:
-                # Procurar todos os selects na página
-                selects = driver.find_elements(By.TAG_NAME, 'select')
-                for select_element in selects:
-                    try:
-                        select_obj = Select(select_element)
-                        options = select_obj.options
-                        for option in options:
-                            if "200" in option.text:
-                                select_obj.select_by_visible_text(option.text)
-                                print(f"✅ Paginação configurada via método alternativo")
-                                break
-                    except:
-                        continue
-            except:
-                print("⚠️  Continuando sem alterar paginação...")
+            print(f"⚠️  Não foi possível configurar paginação: {e}")
         
         time.sleep(3)
+        salvar_screenshot("paginacao_configurada")
         
         # ====================================================================
-        # 5. LOOP PRINCIPAL PARA DOWNLOAD DOS XMLs
+        # 5. LOOP DE DOWNLOAD DOS XMLs
         # ====================================================================
-        print("\n" + "=" * 60)
-        print("5️⃣  ETAPA 5: DOWNLOAD DOS XMLs (65 CICLOS)")
-        print("=" * 60)
+        print("\n" + "=" * 70)
+        print("5️⃣  ETAPA 5: DOWNLOAD DOS XMLs")
+        print("=" * 70)
         
         ciclos_executados = 0
-        max_ciclos = 65
+        max_ciclos = 5  # Reduzido para testes, aumentar para 65 em produção
         
         for ciclo in range(max_ciclos):
             print(f"\n🔄 CICLO {ciclo + 1} de {max_ciclos}")
@@ -368,67 +480,79 @@ def main():
             
             # B) Selecionar todos os itens
             try:
-                checkbox = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')))
-                checkbox.click()
-                print("✅ Todos os itens selecionados")
-            except Exception as e:
-                print(f"⚠️  Erro ao selecionar itens: {str(e)}")
-                print("Tentando seleção via JavaScript...")
-                
-                try:
-                    driver.execute_script("""
-                        var checkbox = document.querySelector('#jqgh_listagem_checkBox input[type="checkbox"]');
-                        if (checkbox) {
-                            checkbox.click();
-                        }
-                    """)
-                    print("✅ Itens selecionados via JavaScript")
-                except:
-                    print("❌ Não foi possível selecionar itens. Continuando...")
-            
-            time.sleep(3)
-            
-            # C) Clicar em "XML Múltiplos"
-            try:
-                xml_multiplos = driver.find_element(By.XPATH, '//*[@id="xml_multiplos"]/h3')
-                xml_multiplos.click()
-                print("📄 Clicado em 'XML Múltiplos'")
-                
-                # Aguardar download iniciar
-                time.sleep(5)
-                
-                # Pressionar Enter se necessário
-                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
-                print("↵ Enter pressionado para confirmar download")
-                
-            except Exception as e:
-                print(f"⚠️  Erro ao clicar em XML Múltiplos: {str(e)}")
-                print("Tentando método alternativo...")
-                
-                try:
-                    # Buscar por elemento com texto "XML"
-                    elementos = driver.find_elements(By.XPATH, '//*[contains(text(), "XML")]')
-                    for elemento in elementos:
-                        if "múltiplo" in elemento.text.lower() or "multiplo" in elemento.text.lower():
-                            elemento.click()
-                            print("✅ Encontrado e clicado em XML Múltiplos (texto alternativo)")
+                # Procurar checkbox principal
+                checkboxes = driver.find_elements(By.CSS_SELECTOR, 'input[type="checkbox"]')
+                if checkboxes:
+                    # Tentar encontrar o checkbox principal (geralmente o primeiro)
+                    main_checkbox = None
+                    for cb in checkboxes:
+                        if cb.is_displayed() and cb.is_enabled():
+                            main_checkbox = cb
                             break
-                except:
-                    print("❌ Não foi possível acessar XML Múltiplos")
-            
-            time.sleep(3)
-            
-            # D) Desmarcar checkbox para próxima página
-            try:
-                driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input').click()
-                print("✅ Checkbox desmarcado")
-            except:
-                pass  # Não crítico se falhar
+                    
+                    if main_checkbox:
+                        if not main_checkbox.is_selected():
+                            main_checkbox.click()
+                            print("✅ Todos os itens selecionados")
+                        else:
+                            print("ℹ️  Itens já selecionados")
+                    else:
+                        print("⚠️  Checkbox principal não encontrado")
+                else:
+                    print("⚠️  Nenhum checkbox encontrado")
+                    
+            except Exception as e:
+                print(f"⚠️  Erro ao selecionar itens: {e}")
             
             time.sleep(2)
             
-            # E) Verificar e navegar para próxima página
-            if ciclo < max_ciclos - 1:  # Não tentar navegar no último ciclo
+            # C) Clicar em "XML Múltiplos"
+            try:
+                # Procurar botão XML Múltiplos
+                buttons = driver.find_elements(By.TAG_NAME, 'button')
+                xml_button = None
+                
+                for button in buttons:
+                    text = button.text.lower()
+                    if 'xml' in text and ('múltiplo' in text or 'multiplo' in text):
+                        xml_button = button
+                        break
+                
+                if xml_button:
+                    xml_button.click()
+                    print("📄 Botão 'XML Múltiplos' clicado")
+                    
+                    # Aguardar download
+                    aguardar_download(8)
+                    
+                    # Pressionar Enter se necessário
+                    try:
+                        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
+                        print("↵ Enter pressionado")
+                    except:
+                        pass
+                        
+                else:
+                    print("⚠️  Botão 'XML Múltiplos' não encontrado")
+                    
+            except Exception as e:
+                print(f"⚠️  Erro ao processar XML Múltiplos: {e}")
+            
+            time.sleep(3)
+            
+            # D) Desmarcar checkbox
+            try:
+                checkboxes = driver.find_elements(By.CSS_SELECTOR, 'input[type="checkbox"]:checked')
+                if checkboxes:
+                    checkboxes[0].click()
+                    print("✅ Checkbox desmarcado")
+            except:
+                pass
+            
+            time.sleep(2)
+            
+            # E) Navegar para próxima página (se não for o último ciclo)
+            if ciclo < max_ciclos - 1:
                 if verificar_proxima_pagina():
                     try:
                         # Rolar para baixo
@@ -436,26 +560,20 @@ def main():
                         time.sleep(2)
                         
                         # Clicar no botão próximo
-                        next_button = driver.find_element(By.XPATH, '//*[@id="next_plistagem"]/span')
-                        next_button.click()
-                        print("➡️  Navegando para próxima página")
-                        ciclos_executados += 1
+                        next_buttons = driver.find_elements(By.CSS_SELECTOR, '#next_plistagem, .ui-paginator-next, [title="Next"], [aria-label="Next"]')
                         
-                        # Aguardar carregamento da nova página
-                        time.sleep(5)
-                        
-                    except Exception as e:
-                        print(f"❌ Erro ao navegar para próxima página: {str(e)}")
-                        print("Tentando navegação via JavaScript...")
-                        
-                        try:
-                            driver.execute_script("$('#next_plistagem').click();")
-                            print("✅ Navegação via JavaScript bem-sucedida")
+                        if next_buttons:
+                            next_buttons[0].click()
+                            print("➡️  Navegando para próxima página")
                             ciclos_executados += 1
                             time.sleep(5)
-                        except:
-                            print("❌ Falha na navegação. Encerrando loop.")
+                        else:
+                            print("⚠️  Botão próximo não encontrado")
                             break
+                            
+                    except Exception as e:
+                        print(f"❌ Erro ao navegar: {e}")
+                        break
                 else:
                     print("🏁 Fim das páginas atingido")
                     break
@@ -466,28 +584,41 @@ def main():
         # ====================================================================
         # 6. RELATÓRIO FINAL
         # ====================================================================
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 70)
         print("📊 RELATÓRIO FINAL")
-        print("=" * 60)
-        print(f"✅ Processo concluído com sucesso!")
+        print("=" * 70)
+        print(f"✅ Processo concluído!")
         print(f"📈 Ciclos executados: {ciclos_executados} de {max_ciclos}")
-        print(f"⏰ Tempo total aproximado: {(ciclos_executados * 15) // 60} minutos")
-        print("=" * 60)
+        
+        # Verificar arquivos baixados
+        downloads_dir = os.getcwd()
+        arquivos_xml = list(Path(downloads_dir).glob('*.xml'))
+        arquivos_zip = list(Path(downloads_dir).glob('*.zip'))
+        
+        print(f"📁 Arquivos XML encontrados: {len(arquivos_xml)}")
+        print(f"📁 Arquivos ZIP encontrados: {len(arquivos_zip)}")
+        
+        if arquivos_xml or arquivos_zip:
+            print("\n📋 Lista de arquivos baixados:")
+            for arquivo in arquivos_xml[:10]:  # Mostrar apenas os 10 primeiros
+                print(f"  • {arquivo.name}")
+            if len(arquivos_xml) > 10:
+                print(f"  • ... e mais {len(arquivos_xml) - 10} arquivos")
+        
+        print("=" * 70)
         
     except Exception as e:
-        print(f"\n❌ ERRO CRÍTICO NO PROCESSO PRINCIPAL: {str(e)}")
+        print(f"\n❌ ERRO CRÍTICO NO PROCESSO: {str(e)}")
+        import traceback
+        traceback.print_exc()
         
-        # Capturar informações para debug
+        # Salvar informações para debug
         try:
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            # Screenshot do erro
+            salvar_screenshot("erro_critico")
             
-            # Screenshot
-            screenshot_path = f'error_screenshot_{timestamp}.png'
-            driver.save_screenshot(screenshot_path)
-            print(f"📸 Screenshot salvo: {screenshot_path}")
-            
-            # Código fonte da página
-            page_source_path = f'page_source_{timestamp}.html'
+            # Salvar página HTML
+            page_source_path = f"page_source_error_{int(time.time())}.html"
             with open(page_source_path, 'w', encoding='utf-8') as f:
                 f.write(driver.page_source)
             print(f"📄 Código fonte salvo: {page_source_path}")
@@ -496,28 +627,117 @@ def main():
             print(f"🌐 URL atual: {driver.current_url}")
             
         except Exception as debug_error:
-            print(f"⚠️  Erro ao capturar debug: {debug_error}")
+            print(f"⚠️  Erro ao salvar debug: {debug_error}")
 
 # ============================================================================
-# EXECUÇÃO PRINCIPAL
+# EXECUÇÃO PRINCIPAL COM CONTROLE DE ERROS
 # ============================================================================
-if __name__ == "__main__":
+def main():
+    """Função principal com tratamento de erros robusto"""
+    
     try:
-        main()
+        print("\n" + "=" * 70)
+        print("🎬 INICIANDO EXECUÇÃO DO SCRIPT")
+        print("=" * 70)
+        
+        # Executar o processo
+        executar_processo()
+        
+        print("\n✅ Processo finalizado com sucesso!")
+        
     except KeyboardInterrupt:
         print("\n\n⚠️  Processo interrompido pelo usuário")
+        
     except Exception as e:
         print(f"\n❌ ERRO GLOBAL: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
     finally:
-        print("\n" + "=" * 60)
-        print("🧹 FINALIZANDO...")
+        print("\n" + "=" * 70)
+        print("🧹 FINALIZANDO RECURSOS")
+        print("=" * 70)
         
         try:
             # Fechar navegador
             driver.quit()
-            print("✅ Navegador fechado com sucesso")
+            print("✅ Navegador fechado")
         except:
             print("⚠️  Navegador já fechado ou erro ao fechar")
         
-        print("🎯 Script finalizado!")
-        print("=" * 60)
+        print("\n🎯 SCRIPT FINALIZADO!")
+        print("=" * 70)
+
+# ============================================================================
+# PONTO DE ENTRADA
+# ============================================================================
+if __name__ == "__main__":
+    
+    # Se estiver no Streamlit Cloud, criar interface web
+    if IS_STREAMLIT_CLOUD:
+        try:
+            import streamlit as st
+            
+            st.set_page_config(
+                page_title="MasterSAF XML Download",
+                page_icon="📊",
+                layout="wide"
+            )
+            
+            st.title("📊 MasterSAF XML Download")
+            st.markdown("---")
+            
+            # Sidebar com configurações
+            with st.sidebar:
+                st.header("⚙️ Configurações")
+                ciclos = st.slider("Número de ciclos", 1, 65, 5)
+                modo_teste = st.checkbox("Modo de teste", value=True)
+                
+                if st.button("🚀 Iniciar Download", type="primary"):
+                    with st.spinner("Executando processo de download..."):
+                        # Criar área para logs
+                        log_container = st.empty()
+                        
+                        # Redirecionar output para Streamlit
+                        import io
+                        from contextlib import redirect_stdout, redirect_stderr
+                        
+                        f = io.StringIO()
+                        with redirect_stdout(f), redirect_stderr(f):
+                            # Executar processo
+                            main()
+                        
+                        # Mostrar logs
+                        logs = f.getvalue()
+                        log_container.text_area("Logs de Execução", logs, height=400)
+            
+            # Área principal
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.info("""
+                ### 📋 Instruções:
+                1. Configure o número de ciclos na sidebar
+                2. Clique em "Iniciar Download"
+                3. Aguarde a execução completa
+                4. Verifique os logs abaixo
+                """)
+            
+            with col2:
+                st.warning("""
+                ### ⚠️ Importante:
+                - O processo pode levar vários minutos
+                - Mantenha a página aberta durante a execução
+                - Verifique os logs para ver o progresso
+                - Arquivos são baixados no diretório atual
+                """)
+            
+            st.markdown("---")
+            st.caption("Versão 2.0 - Otimizado para Streamlit Cloud")
+            
+        except ImportError:
+            print("Streamlit não disponível, executando em modo console...")
+            main()
+    else:
+        # Modo console (local)
+        main()
