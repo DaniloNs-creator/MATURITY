@@ -1,795 +1,743 @@
-import streamlit as st
-import sqlite3
-from datetime import datetime, timedelta, date
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import random
-from typing import List, Tuple, Optional
-import io
-import contextlib
-import chardet
-from io import BytesIO
-import base64
-import time
-import xml.etree.ElementTree as ET
+# projeto.py - Script completo para download de XMLs do MasterSAF
+
 import os
-import hashlib
-import xml.dom.minidom
-import traceback
+import sys
+import time
 from pathlib import Path
-import numpy as np
 
-# --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(
-    page_title="Sistema de Processamento",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ============================================================================
+# CONFIGURAÇÃO INICIAL - VERIFICAÇÕES DE AMBIENTE
+# ============================================================================
+print("=" * 70)
+print("🚀 INICIANDO SCRIPT DE DOWNLOAD DE XMLs - MASTERSAF")
+print("=" * 70)
 
-# Namespaces para CT-e
-CTE_NAMESPACES = {
-    'cte': 'http://www.portalfiscal.inf.br/cte'
-}
+# Verificar se estamos no Streamlit Cloud
+IS_STREAMLIT_CLOUD = os.environ.get('STREAMLIT_SHARING') is not None
+print(f"📡 Ambiente detectado: {'Streamlit Cloud' if IS_STREAMLIT_CLOUD else 'Local'}")
 
-# Inicialização do estado da sessão
-if 'selected_xml' not in st.session_state:
-    st.session_state.selected_xml = None
-if 'cte_data' not in st.session_state:
-    st.session_state.cte_data = None
+# ============================================================================
+# CONFIGURAÇÃO DO WEBDRIVER (SOLUÇÃO ROBUSTA)
+# ============================================================================
+print("\n" + "=" * 70)
+print("🔧 CONFIGURANDO WEBDRIVER")
+print("=" * 70)
 
-# --- ANIMAÇÕES DE CARREGAMENTO ---
-def show_loading_animation(message="Processando..."):
-    """Exibe uma animação de carregamento"""
-    with st.spinner(message):
-        progress_bar = st.progress(0)
-        for i in range(100):
-            time.sleep(0.01)
-            progress_bar.progress(i + 1)
-        progress_bar.empty()
-
-def show_processing_animation(message="Analisando dados..."):
-    """Exibe animação de processamento"""
-    placeholder = st.empty()
-    with placeholder.container():
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.info(f"⏳ {message}")
-            spinner_placeholder = st.empty()
-            spinner_chars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
-            for i in range(20):
-                spinner_placeholder.markdown(f"<div style='text-align: center; font-size: 24px;'>{spinner_chars[i % 8]}</div>", unsafe_allow_html=True)
-                time.sleep(0.1)
-    placeholder.empty()
-
-def show_success_animation(message="Concluído!"):
-    """Exibe animação de sucesso"""
-    success_placeholder = st.empty()
-    with success_placeholder.container():
-        st.success(f"✅ {message}")
-        time.sleep(1.5)
-    success_placeholder.empty()
-
-# --- FUNÇÕES DO PROCESSADOR DE ARQUIVOS ---
-def processador_txt():
-    st.title("📄 Processador de Arquivos TXT")
-    st.markdown("""
-    <div class="card">
-        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
-    </div>
-    """, unsafe_allow_html=True)
-
-    def detectar_encoding(conteudo):
-        """Detecta o encoding do conteúdo do arquivo"""
-        resultado = chardet.detect(conteudo)
-        return resultado['encoding']
-
-    def processar_arquivo(conteudo, padroes):
-        """
-        Processa o conteúdo do arquivo removendo linhas indesejadas e realizando substituições
-        """
-        try:
-            substituicoes = {
-                "IMPOSTO IMPORTACAO": "IMP IMPORT",
-                "TAXA SICOMEX": "TX SISCOMEX",
-                "FRETE INTERNACIONAL": "FRET INTER",
-                "SEGURO INTERNACIONAL": "SEG INTERN"
-            }
-            
-            encoding = detectar_encoding(conteudo)
-            
-            try:
-                texto = conteudo.decode(encoding)
-            except UnicodeDecodeError:
-                texto = conteudo.decode('latin-1')
-            
-            linhas = texto.splitlines()
-            linhas_processadas = []
-            
-            for linha in linhas:
-                linha = linha.strip()
-                if not any(padrao in linha for padrao in padroes):
-                    for original, substituto in substituicoes.items():
-                        linha = linha.replace(original, substituto)
-                    linhas_processadas.append(linha)
-            
-            return "\n".join(linhas_processadas), len(linhas)
-        
-        except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {str(e)}")
-            return None, 0
-
-    # Padrões padrão para remoção
-    padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
+# TENTATIVAS EM ORDEM DE PRIORIDADE
+def setup_webdriver():
+    """Configura o WebDriver com múltiplas tentativas de fallback"""
     
-    # Upload do arquivo
-    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
+    attempts = []
     
-    # Opções avançadas
-    with st.expander("⚙️ Configurações avançadas", expanded=False):
-        padroes_adicionais = st.text_input(
-            "Padrões adicionais para remoção (separados por vírgula)",
-            help="Exemplo: padrão1, padrão2, padrão3"
-        )
-        
-        padroes = padroes_default + [
-            p.strip() for p in padroes_adicionais.split(",") 
-            if p.strip()
-        ] if padroes_adicionais else padroes_default
-
-    if arquivo is not None:
-        if st.button("🔄 Processar Arquivo TXT"):
-            try:
-                show_loading_animation("Analisando arquivo TXT...")
-                conteudo = arquivo.read()
-                show_processing_animation("Processando linhas...")
-                resultado, total_linhas = processar_arquivo(conteudo, padroes)
-                
-                if resultado is not None:
-                    show_success_animation("Arquivo processado com sucesso!")
-                    
-                    linhas_processadas = len(resultado.splitlines())
-                    st.success(f"""
-                    **Processamento concluído!**  
-                    ✔️ Linhas originais: {total_linhas}  
-                    ✔️ Linhas processadas: {linhas_processadas}  
-                    ✔️ Linhas removidas: {total_linhas - linhas_processadas}
-                    """)
-
-                    st.subheader("Prévia do resultado")
-                    st.text_area("Conteúdo processado", resultado, height=300)
-
-                    buffer = BytesIO()
-                    buffer.write(resultado.encode('utf-8'))
-                    buffer.seek(0)
-                    
-                    st.download_button(
-                        label="⬇️ Baixar arquivo processado",
-                        data=buffer,
-                        file_name=f"processado_{arquivo.name}",
-                        mime="text/plain"
-                    )
-            
-            except Exception as e:
-                st.error(f"Erro inesperado: {str(e)}")
-                st.info("Tente novamente ou verifique o arquivo.")
-
-# --- PROCESSADOR CT-E COM EXTRAÇÃO DO PESO BRUTO E PESO BASE DE CÁLCULO ---
-class CTeProcessorDirect:
-    def __init__(self):
-        self.processed_data = []
-    
-    def extract_nfe_number_from_key(self, chave_acesso):
-        """Extrai o número da NF-e da chave de acesso"""
-        if not chave_acesso or len(chave_acesso) != 44:
-            return None
-        
-        try:
-            numero_nfe = chave_acesso[25:34]
-            return numero_nfe
-        except Exception:
-            return None
-    
-    def extract_peso_bruto(self, root):
-        """Extrai o peso bruto do CT-e - BUSCA EM PESO BRUTO E PESO BASE DE CÁLCULO"""
-        try:
-            def find_text(element, xpath):
-                try:
-                    for prefix, uri in CTE_NAMESPACES.items():
-                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
-                        found = element.find(full_xpath)
-                        if found is not None and found.text:
-                            return found.text
-                    
-                    found = element.find(xpath.replace('cte:', ''))
-                    if found is not None and found.text:
-                        return found.text
-                    return None
-                except Exception:
-                    return None
-            
-            # Lista de tipos de peso a serem procurados (em ordem de prioridade)
-            tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
-            
-            # Busca por todas as tags infQ com namespaces
-            for prefix, uri in CTE_NAMESPACES.items():
-                infQ_elements = root.findall(f'.//{{{uri}}}infQ')
-                for infQ in infQ_elements:
-                    tpMed = infQ.find(f'{{{uri}}}tpMed')
-                    qCarga = infQ.find(f'{{{uri}}}qCarga')
-                    
-                    if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                        # Verifica cada tipo de peso na ordem de prioridade
-                        for tipo_peso in tipos_peso:
-                            if tipo_peso in tpMed.text.upper():
-                                peso = float(qCarga.text)
-                                return peso, tipo_peso  # Retorna o peso e o tipo encontrado
-            
-            # Tentativa alternativa sem namespace
-            infQ_elements = root.findall('.//infQ')
-            for infQ in infQ_elements:
-                tpMed = infQ.find('tpMed')
-                qCarga = infQ.find('qCarga')
-                
-                if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                    for tipo_peso in tipos_peso:
-                        if tipo_peso in tpMed.text.upper():
-                            peso = float(qCarga.text)
-                            return peso, tipo_peso
-            
-            return 0.0, "Não encontrado"
-            
-        except Exception as e:
-            st.warning(f"Não foi possível extrair o peso: {str(e)}")
-            return 0.0, "Erro na extração"
-    
-    def extract_cte_data(self, xml_content, filename):
-        """Extrai dados específicos do CT-e incluindo peso bruto"""
-        try:
-            root = ET.fromstring(xml_content)
-            
-            for prefix, uri in CTE_NAMESPACES.items():
-                ET.register_namespace(prefix, uri)
-            
-            def find_text(element, xpath):
-                try:
-                    for prefix, uri in CTE_NAMESPACES.items():
-                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
-                        found = element.find(full_xpath)
-                        if found is not None and found.text:
-                            return found.text
-                    
-                    found = element.find(xpath.replace('cte:', ''))
-                    if found is not None and found.text:
-                        return found.text
-                    return None
-                except Exception:
-                    return None
-            
-            # Extrai dados do CT-e
-            nCT = find_text(root, './/cte:nCT')
-            dhEmi = find_text(root, './/cte:dhEmi')
-            cMunIni = find_text(root, './/cte:cMunIni')
-            UFIni = find_text(root, './/cte:UFIni')
-            cMunFim = find_text(root, './/cte:cMunFim')
-            UFFim = find_text(root, './/cte:UFFim')
-            emit_xNome = find_text(root, './/cte:emit/cte:xNome')
-            vTPrest = find_text(root, './/cte:vTPrest')
-            rem_xNome = find_text(root, './/cte:rem/cte:xNome')
-            
-            # Extrai dados do destinatário
-            dest_xNome = find_text(root, './/cte:dest/cte:xNome')
-            dest_CNPJ = find_text(root, './/cte:dest/cte:CNPJ')
-            dest_CPF = find_text(root, './/cte:dest/cte:CPF')
-            
-            documento_destinatario = dest_CNPJ or dest_CPF or 'N/A'
-            
-            # Extrai endereço do destinatário
-            dest_xLgr = find_text(root, './/cte:dest/cte:enderDest/cte:xLgr')
-            dest_nro = find_text(root, './/cte:dest/cte:enderDest/cte:nro')
-            dest_xBairro = find_text(root, './/cte:dest/cte:enderDest/cte:xBairro')
-            dest_cMun = find_text(root, './/cte:dest/cte:enderDest/cte:cMun')
-            dest_xMun = find_text(root, './/cte:dest/cte:enderDest/cte:xMun')
-            dest_CEP = find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
-            dest_UF = find_text(root, './/cte:dest/cte:enderDest/cte:UF')
-            
-            # Monta endereço completo
-            endereco_destinatario = ""
-            if dest_xLgr:
-                endereco_destinatario += f"{dest_xLgr}"
-                if dest_nro:
-                    endereco_destinatario += f", {dest_nro}"
-                if dest_xBairro:
-                    endereco_destinatario += f" - {dest_xBairro}"
-                if dest_xMun:
-                    endereco_destinatario += f", {dest_xMun}"
-                if dest_UF:
-                    endereco_destinatario += f"/{dest_UF}"
-                if dest_CEP:
-                    endereco_destinatario += f" - CEP: {dest_CEP}"
-            
-            if not endereco_destinatario:
-                endereco_destinatario = "N/A"
-            
-            infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
-            numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
-            
-            # EXTRAI O PESO BRUTO - AGORA COM BUSCA EM MÚLTIPLOS CAMPOS
-            peso_bruto, tipo_peso_encontrado = self.extract_peso_bruto(root)
-            
-            # Formata data
-            data_formatada = None
-            if dhEmi:
-                try:
-                    try:
-                        data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
-                    except:
-                        try:
-                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
-                        except:
-                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%y')
-                    data_formatada = data_obj.strftime('%d/%m/%y')
-                except:
-                    data_formatada = dhEmi[:10]
-            
-            # Converte valor para decimal
-            try:
-                vTPrest = float(vTPrest) if vTPrest else 0.0
-            except (ValueError, TypeError):
-                vTPrest = 0.0
-            
-            return {
-                'Arquivo': filename,
-                'nCT': nCT or 'N/A',
-                'Data Emissão': data_formatada or dhEmi or 'N/A',
-                'Código Município Início': cMunIni or 'N/A',
-                'UF Início': UFIni or 'N/A',
-                'Código Município Fim': cMunFim or 'N/A',
-                'UF Fim': UFFim or 'N/A',
-                'Emitente': emit_xNome or 'N/A',
-                'Valor Prestação': vTPrest,
-                'Peso Bruto (kg)': peso_bruto,
-                'Tipo de Peso Encontrado': tipo_peso_encontrado,  # NOVO CAMPO
-                'Remetente': rem_xNome or 'N/A',
-                'Destinatário': dest_xNome or 'N/A',
-                'Documento Destinatário': documento_destinatario,
-                'Endereço Destinatário': endereco_destinatario,
-                'Município Destino': dest_xMun or 'N/A',
-                'UF Destino': dest_UF or 'N/A',
-                'Chave NFe': infNFe_chave or 'N/A',
-                'Número NFe': numero_nfe or 'N/A',
-                'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-            }
-            
-        except Exception as e:
-            st.error(f"Erro ao extrair dados do CT-e {filename}: {str(e)}")
-            return None
-    
-    def process_single_file(self, uploaded_file):
-        """Processa um único arquivo XML de CT-e"""
-        try:
-            file_content = uploaded_file.getvalue()
-            filename = uploaded_file.name
-            
-            if not filename.lower().endswith('.xml'):
-                return False, "Arquivo não é XML"
-            
-            content_str = file_content.decode('utf-8', errors='ignore')
-            if 'CTe' not in content_str and 'conhecimento' not in content_str.lower():
-                return False, "Arquivo não parece ser um CT-e"
-            
-            cte_data = self.extract_cte_data(content_str, filename)
-            
-            if cte_data:
-                self.processed_data.append(cte_data)
-                return True, f"CT-e {filename} processado com sucesso!"
-            else:
-                return False, f"Erro ao processar CT-e {filename}"
-                
-        except Exception as e:
-            return False, f"Erro ao processar arquivo {filename}: {str(e)}"
-    
-    def process_multiple_files(self, uploaded_files):
-        """Processa múltiplos arquivos XML de CT-e"""
-        results = {
-            'success': 0,
-            'errors': 0,
-            'messages': []
-        }
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for i, uploaded_file in enumerate(uploaded_files):
-            status_text.text(f"Processando {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
-            progress_bar.progress((i + 1) / len(uploaded_files))
-            
-            success, message = self.process_single_file(uploaded_file)
-            if success:
-                results['success'] += 1
-            else:
-                results['errors'] += 1
-            results['messages'].append(message)
-        
-        progress_bar.empty()
-        status_text.empty()
-        
-        return results
-    
-    def get_dataframe(self):
-        """Retorna os dados processados como DataFrame"""
-        if self.processed_data:
-            return pd.DataFrame(self.processed_data)
-        return pd.DataFrame()
-    
-    def clear_data(self):
-        """Limpa os dados processados"""
-        self.processed_data = []
-
-# --- FUNÇÃO PARA CRIAR LINHA DE TENDÊNCIA SIMPLES SEM STATSMODELS ---
-def add_simple_trendline(fig, x, y):
-    """Adiciona uma linha de tendência simples usando regressão linear básica"""
+    # TENTATIVA 1: ChromeDriver AutoInstaller (mais confiável)
     try:
-        # Remove valores NaN
-        mask = ~np.isnan(x) & ~np.isnan(y)
-        x_clean = x[mask]
-        y_clean = y[mask]
+        print("\n🔄 Tentativa 1: ChromeDriver AutoInstaller")
+        import chromedriver_autoinstaller
+        # Verificar e instalar ChromeDriver
+        chromedriver_path = chromedriver_autoinstaller.install()
+        print(f"✅ ChromeDriver instalado em: {chromedriver_path}")
         
-        if len(x_clean) > 1:
-            # Regressão linear simples
-            coefficients = np.polyfit(x_clean, y_clean, 1)
-            polynomial = np.poly1d(coefficients)
-            
-            # Gera pontos para a linha de tendência
-            x_trend = np.linspace(x_clean.min(), x_clean.max(), 100)
-            y_trend = polynomial(x_trend)
-            
-            fig.add_trace(go.Scatter(
-                x=x_trend, 
-                y=y_trend,
-                mode='lines',
-                name='Linha de Tendência',
-                line=dict(color='red', dash='dash'),
-                opacity=0.7
-            ))
-    except Exception:
-        # Se houver erro, simplesmente não adiciona a linha de tendência
-        pass
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        
+        chrome_options = Options()
+        
+        # Configurações ESSENCIAIS para cloud
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        
+        # Evitar detecção como bot
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        # Configurar downloads
+        prefs = {
+            "download.default_directory": os.getcwd(),
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "plugins.always_open_pdf_externally": True,
+            "safebrowsing.enabled": True
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        
+        service = Service(chromedriver_path)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        print("✅ WebDriver configurado com sucesso (Tentativa 1)")
+        return driver, "ChromeDriver AutoInstaller"
+        
+    except Exception as e1:
+        attempts.append(f"Tentativa 1 falhou: {str(e1)[:100]}")
+        print(f"❌ Tentativa 1 falhou: {e1}")
+    
+    # TENTATIVA 2: WebDriver Manager
+    try:
+        print("\n🔄 Tentativa 2: WebDriver Manager")
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--window-size=1920,1080')
+        
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        print("✅ WebDriver configurado com sucesso (Tentativa 2)")
+        return driver, "WebDriver Manager"
+        
+    except Exception as e2:
+        attempts.append(f"Tentativa 2 falhou: {str(e2)[:100]}")
+        print(f"❌ Tentativa 2 falhou: {e2}")
+    
+    # TENTATIVA 3: Configuração direta (último recurso)
+    try:
+        print("\n🔄 Tentativa 3: Configuração direta")
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        
+        # Configurações específicas para Streamlit Cloud
+        if IS_STREAMLIT_CLOUD:
+            chrome_options.binary_location = '/usr/bin/chromium-browser'
+            chrome_options.add_argument('--disable-setuid-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+        
+        driver = webdriver.Chrome(options=chrome_options)
+        
+        print("✅ WebDriver configurado com sucesso (Tentativa 3)")
+        return driver, "Configuração direta"
+        
+    except Exception as e3:
+        attempts.append(f"Tentativa 3 falhou: {str(e3)[:100]}")
+        print(f"❌ Tentativa 3 falhou: {e3}")
+    
+    # SE TODAS AS TENTATIVAS FALHAREM
+    print("\n" + "=" * 70)
+    print("❌ FALHA CRÍTICA - TODAS AS TENTATIVAS FALHARAM")
+    print("=" * 70)
+    for i, attempt in enumerate(attempts, 1):
+        print(f"Tentativa {i}: {attempt}")
+    
+    return None, None
 
-def processador_cte():
-    """Interface para o sistema de CT-e com extração do peso bruto"""
-    processor = CTeProcessorDirect()
-    
-    st.title("🚚 Processador de CT-e para Power BI")
-    st.markdown("### Processa arquivos XML de CT-e e gera planilha para análise")
-    
-    with st.expander("ℹ️ Informações sobre a extração do Peso", expanded=True):
-        st.markdown("""
-        **Extração do Peso - Busca Inteligente:**
+# Configurar WebDriver
+driver, method = setup_webdriver()
+
+if driver is None:
+    print("\n🚨 Não foi possível configurar o WebDriver. Encerrando.")
+    sys.exit(1)
+
+print(f"\n🎉 WebDriver configurado usando: {method}")
+
+# ============================================================================
+# IMPORTAÇÕES DO SELENIUM (APÓS CONFIGURAR WEBDRIVER)
+# ============================================================================
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.select import Select
+
+# Configurar wait
+wait = WebDriverWait(driver, 30)
+
+# ============================================================================
+# FUNÇÕES AUXILIARES
+# ============================================================================
+def verificar_login():
+    """Verifica se o login foi realizado com sucesso"""
+    try:
+        time.sleep(3)
+        current_url = driver.current_url
         
-        O sistema agora busca o peso em **múltiplos campos** na seguinte ordem de prioridade:
+        # Verificar por URL
+        if "login" not in current_url.lower():
+            print("✅ Login verificado pela URL")
+            return True
         
-        1. **PESO BRUTO** - Campo principal
-        2. **PESO BASE DE CALCULO** - Campo alternativo 1
-        3. **PESO BASE CÁLCULO** - Campo alternativo 2  
-        4. **PESO** - Campo genérico
+        # Verificar por elementos específicos
+        elementos_login = [
+            '//*[@id="linkListagemReceptorCTEs"]/a',
+            '//*[contains(text(), "Bem-vindo")]',
+            '//*[contains(text(), "Dashboard")]',
+            '//*[contains(text(), "Sair")]'
+        ]
         
-        **Exemplos de campos reconhecidos:**
-        ```xml
-        <infQ>
-            <tpMed>PESO BRUTO</tpMed>
-            <qCarga>319.8000</qCarga>
-        </infQ>
-        ```
-        ```xml
-        <infQ>
-            <tpMed>PESO BASE DE CALCULO</tpMed>
-            <qCarga>250.5000</qCarga>
-        </infQ>
-        ```
+        for xpath in elementos_login:
+            try:
+                element = driver.find_element(By.XPATH, xpath)
+                if element.is_displayed():
+                    print(f"✅ Login verificado: {xpath[:50]}...")
+                    return True
+            except:
+                continue
         
-        **Resultado:** O sistema mostrará qual tipo de peso foi encontrado em cada CT-e
-        """)
-    
-    tab1, tab2, tab3 = st.tabs(["📤 Upload", "👀 Visualizar Dados", "📥 Exportar"])
-    
-    with tab1:
-        st.header("Upload de CT-es")
-        upload_option = st.radio("Selecione o tipo de upload:", 
-                                ["Upload Individual", "Upload em Lote"])
+        print("⚠️ Não foi possível verificar o login automaticamente")
+        return False
         
-        if upload_option == "Upload Individual":
-            uploaded_file = st.file_uploader("Selecione um arquivo XML de CT-e", type=['xml'], key="single_cte")
-            if uploaded_file and st.button("📊 Processar CT-e", key="process_single"):
-                show_loading_animation("Analisando estrutura do XML...")
-                show_processing_animation("Extraindo dados do CT-e...")
+    except Exception as e:
+        print(f"⚠️ Erro ao verificar login: {str(e)}")
+        return False
+
+def verificar_proxima_pagina():
+    """Verifica se há próxima página disponível"""
+    try:
+        # Tentar encontrar botão próximo
+        try:
+            next_btn = driver.find_element(By.XPATH, '//*[@id="next_plistagem"]')
+            if "ui-state-disabled" in next_btn.get_attribute("class"):
+                print("ℹ️  Botão 'Próximo' está desabilitado")
+                return False
+            else:
+                print("✅ Há próxima página disponível")
+                return True
+        except:
+            pass
+        
+        # Método alternativo: verificar paginação
+        try:
+            pagination_elements = driver.find_elements(By.CSS_SELECTOR, '.ui-paginator-page, .pagination a')
+            if pagination_elements:
+                current_page = None
+                for element in pagination_elements:
+                    if "active" in element.get_attribute("class") or "selected" in element.get_attribute("class"):
+                        current_page = element.text
                 
-                success, message = processor.process_single_file(uploaded_file)
-                if success:
-                    show_success_animation("CT-e processado com sucesso!")
-                    
-                    df = processor.get_dataframe()
-                    if not df.empty:
-                        ultimo_cte = df.iloc[-1]
-                        st.info(f"""
-                        **Extração bem-sucedida:**
-                        - **Peso encontrado:** {ultimo_cte['Peso Bruto (kg)']} kg
-                        - **Tipo de peso:** {ultimo_cte['Tipo de Peso Encontrado']}
-                        """)
-                else:
-                    st.error(message)
+                if current_page:
+                    print(f"ℹ️  Página atual: {current_page}")
+                    return True
+        except:
+            pass
         
-        else:
-            uploaded_files = st.file_uploader("Selecione múltiplos arquivos XML de CT-e", 
-                                            type=['xml'], 
-                                            accept_multiple_files=True,
-                                            key="multiple_cte")
-            if uploaded_files and st.button("📊 Processar Todos", key="process_multiple"):
-                show_loading_animation(f"Iniciando processamento de {len(uploaded_files)} arquivos...")
-                
-                results = processor.process_multiple_files(uploaded_files)
-                show_success_animation("Processamento em lote concluído!")
-                
-                st.success(f"""
-                **Processamento concluído!**  
-                ✅ Sucessos: {results['success']}  
-                ❌ Erros: {results['errors']}
+        # Verificar se há mais dados na tabela
+        try:
+            rows = driver.find_elements(By.CSS_SELECTOR, 'tbody tr')
+            if len(rows) > 0:
+                print(f"ℹ️  {len(rows)} linhas na tabela")
+                return True
+        except:
+            pass
+        
+        print("ℹ️  Não foi possível determinar se há próxima página")
+        return False
+        
+    except Exception as e:
+        print(f"⚠️  Erro ao verificar próxima página: {str(e)}")
+        return False
+
+def aguardar_download(tempo=10):
+    """Aguarda o download ser concluído"""
+    print(f"⏳ Aguardando download ({tempo}s)...")
+    time.sleep(tempo)
+    
+    # Verificar se há arquivos baixados recentemente
+    downloads_dir = os.getcwd()
+    arquivos_antes = list(Path(downloads_dir).glob('*.xml')) + list(Path(downloads_dir).glob('*.zip'))
+    
+    if arquivos_antes:
+        print(f"📁 {len(arquivos_antes)} arquivos XML/ZIP encontrados")
+    
+    return True
+
+def salvar_screenshot(nome):
+    """Salva um screenshot para debug"""
+    try:
+        screenshot_path = f"screenshot_{nome}_{int(time.time())}.png"
+        driver.save_screenshot(screenshot_path)
+        print(f"📸 Screenshot salvo: {screenshot_path}")
+        return screenshot_path
+    except Exception as e:
+        print(f"⚠️  Erro ao salvar screenshot: {e}")
+        return None
+
+# ============================================================================
+# FUNÇÃO PRINCIPAL
+# ============================================================================
+def executar_processo():
+    """Função principal que executa todo o processo"""
+    
+    try:
+        print("\n" + "=" * 70)
+        print("🏁 INICIANDO PROCESSAMENTO")
+        print("=" * 70)
+        
+        # ====================================================================
+        # 1. LOGIN NO SISTEMA
+        # ====================================================================
+        print("\n1️⃣  ETAPA 1: LOGIN")
+        print("-" * 40)
+        
+        # Navegar para página de login
+        print("🌐 Navegando para página de login...")
+        driver.get("https://p.dfe.mastersaf.com.br/mvc/login")
+        
+        # Aguardar carregamento
+        time.sleep(5)
+        salvar_screenshot("login_page")
+        
+        # Preencher usuário
+        try:
+            user_field = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="nomeusuario"]')))
+            user_field.clear()
+            user_field.send_keys("HBR0455")
+            print("👤 Usuário preenchido: HBR0455")
+        except Exception as e:
+            print(f"❌ Erro ao preencher usuário: {e}")
+            # Tentar método alternativo
+            try:
+                user_field = driver.find_element(By.ID, 'nomeusuario')
+                user_field.send_keys("HBR0455")
+                print("👤 Usuário preenchido (método alternativo)")
+            except:
+                print("🚨 Não foi possível encontrar campo de usuário")
+                return
+        
+        # Preencher senha
+        try:
+            pwd_field = driver.find_element(By.XPATH, '//*[@id="senha"]')
+            pwd_field.clear()
+            pwd_field.send_keys("XXXXXXXXXX")  # Substituir pela senha real
+            print("🔒 Senha preenchida")
+        except:
+            try:
+                pwd_field = driver.find_element(By.ID, 'senha')
+                pwd_field.send_keys("XXXXXXXXXX")
+                print("🔒 Senha preenchida (método alternativo)")
+            except:
+                print("🚨 Não foi possível encontrar campo de senha")
+                return
+        
+        # Submeter formulário
+        try:
+            pwd_field.send_keys(Keys.ENTER)
+            print("↵ Enter pressionado para login")
+        except:
+            try:
+                login_button = driver.find_element(By.XPATH, '//button[@type="submit"]')
+                login_button.click()
+                print("🖱️  Botão de login clicado")
+            except:
+                print("⚠️  Não foi possível submeter formulário, tentando continuar...")
+        
+        # Aguardar e verificar login
+        time.sleep(8)
+        salvar_screenshot("pos_login")
+        
+        if not verificar_login():
+            print("❌ Falha no login. Verifique as credenciais.")
+            salvar_screenshot("login_falhou")
+            return
+        
+        print("✅ Login realizado com sucesso!")
+        
+        # ====================================================================
+        # 2. NAVEGAÇÃO PARA RECEPTOR CTEs
+        # ====================================================================
+        print("\n2️⃣  ETAPA 2: NAVEGAÇÃO PARA RECEPTOR CTEs")
+        print("-" * 40)
+        
+        # Método 1: XPATH específico
+        try:
+            receptor_link = wait.until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="linkListagemReceptorCTEs"]/a'))
+            )
+            receptor_link.click()
+            print("📍 Navegando para Receptor CTEs (XPATH)")
+        except:
+            # Método 2: Buscar por texto
+            print("⚠️  XPATH não encontrado, buscando por texto...")
+            try:
+                links = driver.find_elements(By.TAG_NAME, 'a')
+                for link in links:
+                    text = link.text.lower()
+                    if 'receptor' in text or 'cte' in text or 'ct-e' in text:
+                        link.click()
+                        print(f"📍 Encontrado por texto: {text[:30]}")
+                        break
+            except Exception as e:
+                print(f"❌ Não foi possível navegar: {e}")
+                return
+        
+        time.sleep(5)
+        salvar_screenshot("receptor_ctes")
+        print("✅ Página de Receptor CTEs carregada")
+        
+        # ====================================================================
+        # 3. APLICAR FILTRO DE DATAS
+        # ====================================================================
+        print("\n3️⃣  ETAPA 3: FILTRO DE DATAS")
+        print("-" * 40)
+        
+        # Data Inicial
+        try:
+            dt_ini = wait.until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[@id="consultaDataInicial"]')
+            ))
+            dt_ini.click()
+            dt_ini.clear()
+            dt_ini.send_keys("01/09/2025")  # Ajustar para data válida
+            print("📅 Data inicial: 01/09/2025")
+        except:
+            print("⚠️  Campo de data inicial não encontrado")
+            # Tentar via JavaScript
+            try:
+                driver.execute_script("""
+                    document.getElementById('consultaDataInicial').value = '01/09/2025';
                 """)
+                print("📅 Data inicial definida via JavaScript")
+            except:
+                print("❌ Não foi possível definir data inicial")
+        
+        # Data Final
+        try:
+            dt_fim = driver.find_element(By.XPATH, '//*[@id="consultaDataFinal"]')
+            dt_fim.click()
+            dt_fim.clear()
+            dt_fim.send_keys("31/01/2026")
+            print("📅 Data final: 31/01/2026")
+        except:
+            print("⚠️  Campo de data final não encontrado")
+            try:
+                driver.execute_script("""
+                    document.getElementById('consultaDataFinal').value = '31/01/2026';
+                """)
+                print("📅 Data final definida via JavaScript")
+            except:
+                print("❌ Não foi possível definir data final")
+        
+        # Aplicar filtro
+        try:
+            dt_fim.send_keys(Keys.ENTER)
+            print("✅ Filtro aplicado com Enter")
+            time.sleep(5)
+        except:
+            print("⚠️  Não foi possível aplicar filtro, continuando...")
+        
+        salvar_screenshot("filtro_aplicado")
+        
+        # ====================================================================
+        # 4. CONFIGURAR PAGINAÇÃO (200 itens por página)
+        # ====================================================================
+        print("\n4️⃣  ETAPA 4: CONFIGURAÇÃO DE PAGINAÇÃO")
+        print("-" * 40)
+        
+        # Rolar para baixo para encontrar controles de paginação
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+        
+        # Tentar configurar para 200 itens por página
+        try:
+            # Procurar select de paginação
+            selects = driver.find_elements(By.TAG_NAME, 'select')
+            for select_element in selects:
+                try:
+                    select = Select(select_element)
+                    # Tentar encontrar opção 200
+                    for option in select.options:
+                        if '200' in option.text or option.get_attribute('value') == '200':
+                            select.select_by_visible_text(option.text)
+                            print(f"✅ Paginação configurada: {option.text} itens por página")
+                            break
+                except:
+                    continue
+        except Exception as e:
+            print(f"⚠️  Não foi possível configurar paginação: {e}")
+        
+        time.sleep(3)
+        salvar_screenshot("paginacao_configurada")
+        
+        # ====================================================================
+        # 5. LOOP DE DOWNLOAD DOS XMLs
+        # ====================================================================
+        print("\n" + "=" * 70)
+        print("5️⃣  ETAPA 5: DOWNLOAD DOS XMLs")
+        print("=" * 70)
+        
+        ciclos_executados = 0
+        max_ciclos = 5  # Reduzido para testes, aumentar para 65 em produção
+        
+        for ciclo in range(max_ciclos):
+            print(f"\n🔄 CICLO {ciclo + 1} de {max_ciclos}")
+            print("-" * 30)
+            
+            # A) Voltar ao topo
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(2)
+            
+            # B) Selecionar todos os itens
+            try:
+                # Procurar checkbox principal
+                checkboxes = driver.find_elements(By.CSS_SELECTOR, 'input[type="checkbox"]')
+                if checkboxes:
+                    # Tentar encontrar o checkbox principal (geralmente o primeiro)
+                    main_checkbox = None
+                    for cb in checkboxes:
+                        if cb.is_displayed() and cb.is_enabled():
+                            main_checkbox = cb
+                            break
+                    
+                    if main_checkbox:
+                        if not main_checkbox.is_selected():
+                            main_checkbox.click()
+                            print("✅ Todos os itens selecionados")
+                        else:
+                            print("ℹ️  Itens já selecionados")
+                    else:
+                        print("⚠️  Checkbox principal não encontrado")
+                else:
+                    print("⚠️  Nenhum checkbox encontrado")
+                    
+            except Exception as e:
+                print(f"⚠️  Erro ao selecionar itens: {e}")
+            
+            time.sleep(2)
+            
+            # C) Clicar em "XML Múltiplos"
+            try:
+                # Procurar botão XML Múltiplos
+                buttons = driver.find_elements(By.TAG_NAME, 'button')
+                xml_button = None
                 
-                df = processor.get_dataframe()
-                if not df.empty:
-                    # Estatísticas dos tipos de peso encontrados
-                    tipos_peso = df['Tipo de Peso Encontrado'].value_counts()
-                    peso_total = df['Peso Bruto (kg)'].sum()
-                    
-                    st.info(f"""
-                    **Estatísticas de extração:**
-                    - Peso bruto total: {peso_total:,.2f} kg
-                    - Peso médio por CT-e: {df['Peso Bruto (kg)'].mean():,.2f} kg
-                    - Tipos de peso encontrados:
-                    """)
-                    
-                    for tipo, quantidade in tipos_peso.items():
-                        st.write(f"  - **{tipo}**: {quantidade} CT-e(s)")
+                for button in buttons:
+                    text = button.text.lower()
+                    if 'xml' in text and ('múltiplo' in text or 'multiplo' in text):
+                        xml_button = button
+                        break
                 
-                if results['errors'] > 0:
-                    with st.expander("Ver mensagens detalhadas"):
-                        for msg in results['messages']:
-                            st.write(f"- {msg}")
-        
-        if st.button("🗑️ Limpar Dados Processados", type="secondary"):
-            processor.clear_data()
-            st.success("Dados limpos com sucesso!")
-            time.sleep(1)
-            st.rerun()
-    
-    with tab2:
-        st.header("Dados Processados")
-        df = processor.get_dataframe()
-        
-        if not df.empty:
-            st.write(f"Total de CT-es processados: {len(df)}")
-            
-            # Filtros
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                uf_filter = st.multiselect("Filtrar por UF Início", options=df['UF Início'].unique())
-            with col2:
-                uf_destino_filter = st.multiselect("Filtrar por UF Destino", options=df['UF Destino'].unique())
-            with col3:
-                tipo_peso_filter = st.multiselect("Filtrar por Tipo de Peso", options=df['Tipo de Peso Encontrado'].unique())
-            
-            # Filtro de peso
-            st.subheader("Filtro por Peso Bruto")
-            peso_min = float(df['Peso Bruto (kg)'].min())
-            peso_max = float(df['Peso Bruto (kg)'].max())
-            peso_filter = st.slider("Selecione a faixa de peso (kg)", peso_min, peso_max, (peso_min, peso_max))
-            
-            # Aplicar filtros
-            filtered_df = df.copy()
-            if uf_filter:
-                filtered_df = filtered_df[filtered_df['UF Início'].isin(uf_filter)]
-            if uf_destino_filter:
-                filtered_df = filtered_df[filtered_df['UF Destino'].isin(uf_destino_filter)]
-            if tipo_peso_filter:
-                filtered_df = filtered_df[filtered_df['Tipo de Peso Encontrado'].isin(tipo_peso_filter)]
-            filtered_df = filtered_df[
-                (filtered_df['Peso Bruto (kg)'] >= peso_filter[0]) & 
-                (filtered_df['Peso Bruto (kg)'] <= peso_filter[1])
-            ]
-            
-            # Exibir dataframe
-            colunas_principais = [
-                'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
-                'Destinatário', 'UF Início', 'UF Destino', 'Peso Bruto (kg)', 
-                'Tipo de Peso Encontrado', 'Valor Prestação'
-            ]
-            
-            st.dataframe(filtered_df[colunas_principais], use_container_width=True)
-            
-            with st.expander("📋 Ver todos os campos detalhados"):
-                st.dataframe(filtered_df, use_container_width=True)
-            
-            # Estatísticas
-            st.subheader("📈 Estatísticas")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
-            col2.metric("Peso Bruto Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg")
-            col3.metric("Média Peso/CT-e", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg")
-            col4.metric("Tipos de Peso", f"{filtered_df['Tipo de Peso Encontrado'].nunique()}")
-            
-            # Gráficos
-            col_chart1, col_chart2 = st.columns(2)
-            
-            with col_chart1:
-                st.subheader("📊 Distribuição por Tipo de Peso")
-                if not filtered_df.empty:
-                    tipo_counts = filtered_df['Tipo de Peso Encontrado'].value_counts()
-                    fig_tipo = px.pie(
-                        values=tipo_counts.values,
-                        names=tipo_counts.index,
-                        title="Distribuição por Tipo de Peso Encontrado"
-                    )
-                    st.plotly_chart(fig_tipo, use_container_width=True)
-            
-            with col_chart2:
-                st.subheader("📈 Relação Peso x Valor")
-                if not filtered_df.empty:
-                    fig_relacao = px.scatter(
-                        filtered_df,
-                        x='Peso Bruto (kg)',
-                        y='Valor Prestação',
-                        title="Relação entre Peso Bruto e Valor da Prestação",
-                        color='Tipo de Peso Encontrado'
-                    )
+                if xml_button:
+                    xml_button.click()
+                    print("📄 Botão 'XML Múltiplos' clicado")
                     
-                    if st.checkbox("Mostrar linha de tendência", key="trendline"):
-                        add_simple_trendline(fig_relacao, 
-                                           filtered_df['Peso Bruto (kg)'].values, 
-                                           filtered_df['Valor Prestação'].values)
+                    # Aguardar download
+                    aguardar_download(8)
                     
-                    st.plotly_chart(fig_relacao, use_container_width=True)
+                    # Pressionar Enter se necessário
+                    try:
+                        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
+                        print("↵ Enter pressionado")
+                    except:
+                        pass
+                        
+                else:
+                    print("⚠️  Botão 'XML Múltiplos' não encontrado")
+                    
+            except Exception as e:
+                print(f"⚠️  Erro ao processar XML Múltiplos: {e}")
             
-        else:
-            st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
-    
-    with tab3:
-        st.header("Exportar para Excel")
-        df = processor.get_dataframe()
+            time.sleep(3)
+            
+            # D) Desmarcar checkbox
+            try:
+                checkboxes = driver.find_elements(By.CSS_SELECTOR, 'input[type="checkbox"]:checked')
+                if checkboxes:
+                    checkboxes[0].click()
+                    print("✅ Checkbox desmarcado")
+            except:
+                pass
+            
+            time.sleep(2)
+            
+            # E) Navegar para próxima página (se não for o último ciclo)
+            if ciclo < max_ciclos - 1:
+                if verificar_proxima_pagina():
+                    try:
+                        # Rolar para baixo
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        time.sleep(2)
+                        
+                        # Clicar no botão próximo
+                        next_buttons = driver.find_elements(By.CSS_SELECTOR, '#next_plistagem, .ui-paginator-next, [title="Next"], [aria-label="Next"]')
+                        
+                        if next_buttons:
+                            next_buttons[0].click()
+                            print("➡️  Navegando para próxima página")
+                            ciclos_executados += 1
+                            time.sleep(5)
+                        else:
+                            print("⚠️  Botão próximo não encontrado")
+                            break
+                            
+                    except Exception as e:
+                        print(f"❌ Erro ao navegar: {e}")
+                        break
+                else:
+                    print("🏁 Fim das páginas atingido")
+                    break
+            else:
+                print("🎯 Último ciclo completado")
+                ciclos_executados += 1
         
-        if not df.empty:
-            st.success(f"Pronto para exportar {len(df)} registros")
+        # ====================================================================
+        # 6. RELATÓRIO FINAL
+        # ====================================================================
+        print("\n" + "=" * 70)
+        print("📊 RELATÓRIO FINAL")
+        print("=" * 70)
+        print(f"✅ Processo concluído!")
+        print(f"📈 Ciclos executados: {ciclos_executados} de {max_ciclos}")
+        
+        # Verificar arquivos baixados
+        downloads_dir = os.getcwd()
+        arquivos_xml = list(Path(downloads_dir).glob('*.xml'))
+        arquivos_zip = list(Path(downloads_dir).glob('*.zip'))
+        
+        print(f"📁 Arquivos XML encontrados: {len(arquivos_xml)}")
+        print(f"📁 Arquivos ZIP encontrados: {len(arquivos_zip)}")
+        
+        if arquivos_xml or arquivos_zip:
+            print("\n📋 Lista de arquivos baixados:")
+            for arquivo in arquivos_xml[:10]:  # Mostrar apenas os 10 primeiros
+                print(f"  • {arquivo.name}")
+            if len(arquivos_xml) > 10:
+                print(f"  • ... e mais {len(arquivos_xml) - 10} arquivos")
+        
+        print("=" * 70)
+        
+    except Exception as e:
+        print(f"\n❌ ERRO CRÍTICO NO PROCESSO: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        # Salvar informações para debug
+        try:
+            # Screenshot do erro
+            salvar_screenshot("erro_critico")
             
-            export_option = st.radio("Formato de exportação:", 
-                                   ["Excel (.xlsx)", "CSV (.csv)"])
+            # Salvar página HTML
+            page_source_path = f"page_source_error_{int(time.time())}.html"
+            with open(page_source_path, 'w', encoding='utf-8') as f:
+                f.write(driver.page_source)
+            print(f"📄 Código fonte salvo: {page_source_path}")
             
-            st.subheader("Selecionar Colunas para Exportação")
-            todas_colunas = df.columns.tolist()
-            colunas_selecionadas = st.multiselect(
-                "Selecione as colunas para exportar:",
-                options=todas_colunas,
-                default=todas_colunas
+            # URL atual
+            print(f"🌐 URL atual: {driver.current_url}")
+            
+        except Exception as debug_error:
+            print(f"⚠️  Erro ao salvar debug: {debug_error}")
+
+# ============================================================================
+# EXECUÇÃO PRINCIPAL COM CONTROLE DE ERROS
+# ============================================================================
+def main():
+    """Função principal com tratamento de erros robusto"""
+    
+    try:
+        print("\n" + "=" * 70)
+        print("🎬 INICIANDO EXECUÇÃO DO SCRIPT")
+        print("=" * 70)
+        
+        # Executar o processo
+        executar_processo()
+        
+        print("\n✅ Processo finalizado com sucesso!")
+        
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Processo interrompido pelo usuário")
+        
+    except Exception as e:
+        print(f"\n❌ ERRO GLOBAL: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+    finally:
+        print("\n" + "=" * 70)
+        print("🧹 FINALIZANDO RECURSOS")
+        print("=" * 70)
+        
+        try:
+            # Fechar navegador
+            driver.quit()
+            print("✅ Navegador fechado")
+        except:
+            print("⚠️  Navegador já fechado ou erro ao fechar")
+        
+        print("\n🎯 SCRIPT FINALIZADO!")
+        print("=" * 70)
+
+# ============================================================================
+# PONTO DE ENTRADA
+# ============================================================================
+if __name__ == "__main__":
+    
+    # Se estiver no Streamlit Cloud, criar interface web
+    if IS_STREAMLIT_CLOUD:
+        try:
+            import streamlit as st
+            
+            st.set_page_config(
+                page_title="MasterSAF XML Download",
+                page_icon="📊",
+                layout="wide"
             )
             
-            df_export = df[colunas_selecionadas] if colunas_selecionadas else df
+            st.title("📊 MasterSAF XML Download")
+            st.markdown("---")
             
-            if export_option == "Excel (.xlsx)":
-                show_processing_animation("Gerando arquivo Excel...")
+            # Sidebar com configurações
+            with st.sidebar:
+                st.header("⚙️ Configurações")
+                ciclos = st.slider("Número de ciclos", 1, 65, 5)
+                modo_teste = st.checkbox("Modo de teste", value=True)
                 
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df_export.to_excel(writer, sheet_name='Dados_CTe', index=False)
-                
-                output.seek(0)
-                
-                st.download_button(
-                    label="📥 Baixar Planilha Excel",
-                    data=output,
-                    file_name="dados_cte.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                if st.button("🚀 Iniciar Download", type="primary"):
+                    with st.spinner("Executando processo de download..."):
+                        # Criar área para logs
+                        log_container = st.empty()
+                        
+                        # Redirecionar output para Streamlit
+                        import io
+                        from contextlib import redirect_stdout, redirect_stderr
+                        
+                        f = io.StringIO()
+                        with redirect_stdout(f), redirect_stderr(f):
+                            # Executar processo
+                            main()
+                        
+                        # Mostrar logs
+                        logs = f.getvalue()
+                        log_container.text_area("Logs de Execução", logs, height=400)
             
-            else:
-                show_processing_animation("Gerando arquivo CSV...")
-                
-                csv = df_export.to_csv(index=False).encode('utf-8')
-                
-                st.download_button(
-                    label="📥 Baixar Arquivo CSV",
-                    data=csv,
-                    file_name="dados_cte.csv",
-                    mime="text/csv"
-                )
+            # Área principal
+            col1, col2 = st.columns(2)
             
-            with st.expander("📋 Prévia dos dados a serem exportados"):
-                st.dataframe(df_export.head(10))
-                
-        else:
-            st.warning("Nenhum dado disponível para exportação.")
-
-# --- CSS E CONFIGURAÇÃO DE ESTILO ---
-def load_css():
-    st.markdown("""
-    <style>
-        .cover-container {
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
-            padding: 3rem;
-            border-radius: 12px;
-            margin-bottom: 2rem;
-            text-align: center;
-        }
-        .cover-logo {
-            max-width: 300px;
-            margin-bottom: 1.5rem;
-        }
-        .cover-title {
-            font-size: 2.8rem;
-            font-weight: 800;
-            margin-bottom: 1rem;
-            background: linear-gradient(90deg, #2c3e50, #3498db);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .cover-subtitle {
-            font-size: 1.2rem;
-            color: #7f8c8d;
-            margin-bottom: 0;
-        }
-        .header {
-            font-size: 1.8rem;
-            font-weight: 700;
-            margin: 1.5rem 0 1rem 0;
-            padding-left: 10px;
-            border-left: 5px solid #2c3e50;
-        }
-        .card {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            padding: 1.8rem;
-            margin-bottom: 1.8rem;
-        }
-        .stButton>button {
-            width: 100%;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .spinner {
-            animation: spin 2s linear infinite;
-            display: inline-block;
-            font-size: 24px;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- APLICAÇÃO PRINCIPAL ---
-def main():
-    """Função principal que gerencia o fluxo da aplicação."""
-    load_css()
-    
-    st.markdown("""
-    <div class="cover-container">
-        <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
-        <h1 class="cover-title">Sistema de Processamento de Arquivos</h1>
-        <p class="cover-subtitle">Processamento de TXT e CT-e para análise de dados</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["📄 Processador TXT", "🚚 Processador CT-e"])
-    
-    with tab1:
-        processador_txt()
-    
-    with tab2:
-        processador_cte()
-
-if __name__ == "__main__":
-    try:
+            with col1:
+                st.info("""
+                ### 📋 Instruções:
+                1. Configure o número de ciclos na sidebar
+                2. Clique em "Iniciar Download"
+                3. Aguarde a execução completa
+                4. Verifique os logs abaixo
+                """)
+            
+            with col2:
+                st.warning("""
+                ### ⚠️ Importante:
+                - O processo pode levar vários minutos
+                - Mantenha a página aberta durante a execução
+                - Verifique os logs para ver o progresso
+                - Arquivos são baixados no diretório atual
+                """)
+            
+            st.markdown("---")
+            st.caption("Versão 2.0 - Otimizado para Streamlit Cloud")
+            
+        except ImportError:
+            print("Streamlit não disponível, executando em modo console...")
+            main()
+    else:
+        # Modo console (local)
         main()
-    except Exception as e:
-        st.error(f"Ocorreu um erro inesperado: {str(e)}")
-        st.code(traceback.format_exc())
