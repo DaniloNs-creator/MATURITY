@@ -1383,7 +1383,7 @@ elif st.session_state.app_selecionado == "diagnostico":
             with st.sidebar:
                 
                 # NOVA LOGO - usando a PNG do GitHub na sidebar
-                st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/Branco%2C%20azul%20e%20perna%20cinza.png")
+                st.image("https://github.com/DaniloNs-creator/MATURITY/blob/main/R%20Reali%20azul%201.png")
                 st.title("Navegação por Grupos")
                 
                 tab1, tab2, tab3 = st.tabs([ "GESTÃO", "GOVERNANÇA", "SETORES"])
