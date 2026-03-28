@@ -1261,7 +1261,7 @@ if not st.session_state.formulario_preenchido:
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        # ALTERAÇÃO: Logo substituída pela PNG
+        # ALTERAÇÃO 1: Logo substituída pela PNG
         st.image("https://github.com/DaniloNs-creator/MATURITY/blob/main/Branco%2C%20azul%20e%20perna%20cinza.png?raw=true", width=300)
 
         st.header("DIAGNÓSTICO DE GESTÃO, GOVERNANÇA E CONTROLES")
@@ -1726,7 +1726,7 @@ elif st.session_state.app_selecionado == "diagnostico":
 
             with st.sidebar:
                 
-                # ALTERAÇÃO: Logo da sidebar substituída pela PNG
+                # ALTERAÇÃO 2: Logo da sidebar substituída pela PNG
                 st.image("https://github.com/DaniloNs-creator/MATURITY/blob/main/Branco%2C%20azul%20e%20perna%20cinza.png?raw=true")
 
                 st.title("Navegação por Grupos")
@@ -2567,7 +2567,7 @@ elif st.session_state.app_selecionado == "fpa":
 
 
 
-    # ALTERAÇÃO: Substituir o texto "REALI PREMIUM" pela imagem PNG mantendo o layout original
+    # ALTERAÇÃO 3: Substituir o texto "REALI PREMIUM" pela imagem PNG (mantendo o layout original)
     st.markdown(f'<div class="main-title"><img src="https://github.com/DaniloNs-creator/MATURITY/blob/main/Branco%2C%20azul%20e%20perna%20cinza.png?raw=true" style="height: 50px; vertical-align: middle;"> REALI PREMIUM</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="sub-title">CFO & CEO | Painel Executivo de Indicadores (FP&A)</div>', unsafe_allow_html=True)
