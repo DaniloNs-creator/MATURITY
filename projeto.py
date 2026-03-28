@@ -2175,8 +2175,7 @@ elif st.session_state.app_selecionado == "fpa":
     st.divider()
 
     # ALTERADO: "REALI PREMIUM" foi substituído por "MATURITY REALI"
-    st.markdown('<div class="main-title">MATURITY REALI</div>', unsafe_allow_html=True)
-
+    st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/Branco%2C%20azul%20e%20perna%20cinza.png", width=300)
     st.markdown('<div class="sub-title">CFO & CEO | Painel Executivo de Indicadores (FP&A)</div>', unsafe_allow_html=True)
 
     st.divider()
