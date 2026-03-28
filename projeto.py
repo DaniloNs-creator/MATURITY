@@ -35,263 +35,136 @@ st.set_page_config(page_title="Maturity Reali Consultoria", layout='wide', page_
 st.markdown("""
 
 <style>
-
     /* ---------------- CSS ORIGINAL DA MATURITY ---------------- */
-
     /* Animação para todos os botões */
-
     .stButton>button {
-
         transition: all 0.3s ease;
-
         transform: scale(1);
-
     }
-
     .stButton>button:hover {
-
         transform: scale(1.05);
-
         box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-
     }
-
     /* Animação específica para botão de prosseguir e Botões do Menu Central */
-
     button[kind="primary"] {
-
         background-color: #4CAF50;
-
         color: white;
-
         border: none;
-
         animation: pulse 2s infinite;
-
     }
-
     button[kind="primary"]:hover {
-
         background-color: #45a049;
-
         animation: none;
-
     }
-
     /* Animação de pulsar */
-
     @keyframes pulse {
-
         0% { transform: scale(1); }
-
         50% { transform: scale(1.05); }
-
         100% { transform: scale(1); }
-
     }
-
     /* Animação para botão de voltar */
-
     button[kind="secondary"] {
-
         transition: all 0.3s ease;
-
     }
-
     button[kind="secondary"]:hover {
-
         background-color: #f1f1f1;
-
         transform: translateX(-5px);
-
     }
-
     /* Animação para botão de enviar email */
-
     button:contains("ENVIAR POR EMAIL") {
-
         background-color: #FF5722;
-
         color: white;
-
         transition: all 0.3s ease;
-
     }
-
     button:contains("ENVIAR POR EMAIL"):hover {
-
         background-color: #E64A19;
-
         transform: translateY(-3px);
-
         box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-
     }
-
     /* Animação para botão de salvar progresso */
-
     button:contains("Salvar Progresso") {
-
         background-color: #2196F3;
-
         color: white;
-
         transition: all 0.3s ease;
-
     }
-
     button:contains("Salvar Progresso"):hover {
-
         background-color: #0b7dda;
-
         transform: translateY(-3px);
-
     }
-
     /* Animação para botões de navegação */
-
     div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] button {
-
         transition: all 0.3s ease;
-
     }
-
     div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] button:hover {
-
         transform: translateY(-2px);
-
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-
     }
-
     /* Destaque para botão ativo na sidebar */
-
     button[aria-pressed="true"] {
-
         background-color: #4CAF50 !important;
-
         color: white !important;
-
         font-weight: bold;
-
         transform: scale(1.05);
-
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-
     }
 
 
 
     /* ---------------- CSS DO FP&A CFO DASHBOARD ---------------- */
-
     /* Cabeçalho */
-
     .main-title {
-
         font-size: 2.5rem;
-
         font-weight: 800;
-
         color: #0F172A;
-
         text-align: center;
-
         margin-bottom: 0;
-
     }
-
     .sub-title {
-
         font-size: 1.1rem;
-
         color: #64748B;
-
         text-align: center;
-
         margin-bottom: 2rem;
-
         font-weight: 400;
-
         text-transform: uppercase;
-
         letter-spacing: 2px;
-
     }
-
     /* Cartões de Métricas (st.metric) */
-
     [data-testid="stMetric"] {
-
         background: linear-gradient(145deg, #ffffff, #f1f5f9);
-
         border: 1px solid #E2E8F0;
-
         border-radius: 12px;
-
         padding: 20px;
-
         box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.03), -4px -4px 10px rgba(255, 255, 255, 0.8);
-
         transition: all 0.3s ease;
-
     }
-
     [data-testid="stMetric"]:hover {
-
         transform: translateY(-4px);
-
         box-shadow: 6px 6px 15px rgba(0, 0, 0, 0.06), -6px -6px 15px rgba(255, 255, 255, 1);
-
         border-color: #3B82F6;
-
     }
-
     [data-testid="stMetricLabel"] {
-
         font-size: 0.95rem;
-
         font-weight: 600;
-
         color: #475569;
-
         text-transform: uppercase;
-
     }
-
     [data-testid="stMetricValue"] {
-
         font-size: 2.2rem;
-
         font-weight: 800;
-
         color: #1E3A8A;
-
     }
-
     /* Inputs numéricos */
-
     .stNumberInput > div > div > input {
-
         border-radius: 8px;
-
         border: 1px solid #CBD5E1;
-
         background-color: #F8FAFC;
-
         font-weight: 600;
-
         color: #334155;
-
     }
-
     .stNumberInput > div > div > input:focus {
-
         border-color: #3B82F6;
-
         box-shadow: 0 0 0 1px #3B82F6;
-
     }
-
 </style>
 
 """, unsafe_allow_html=True)
@@ -555,11 +428,8 @@ def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normaliza
                     <th style="padding: 8px; text-align: left;">Descrição</th>
 
                     <th style="padding: 8px; text-align: center;">Atual</th>
-
                 </tr>
-
             </thead>
-
             <tbody>
 
         """
@@ -567,29 +437,19 @@ def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normaliza
         
 
         for nivel in niveis:
-
             tabela_html += f"""
-
                 <tr>
-
                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>{nivel['Nível']}</strong></td>
-
                     <td style="padding: 8px; border: 1px solid #ddd;">{nivel['Descrição']}</td>
-
                     <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{nivel['Atual']}</td>
-
                 </tr>
-
             """
 
         
 
         tabela_html += """
-
             </tbody>
-
         </table>
-
         """
 
 
@@ -597,71 +457,38 @@ def enviar_email(destinatario, arquivo_questionario, fig_original, fig_normaliza
         # Corpo do email com gráficos embutidos e mensagem de progresso
 
         corpo = f"""
-
         <p>Prezado(a) {st.session_state.nome},</p>
-
         <p>Oi, tudo bem?<p>
-
         <p>Antes de tudo, queremos agradecer por ter dedicado um tempinho para preencher a nossa Matriz de Maturidade.<p>
-
         <p>Essa ferramenta nos ajuda (e muito!) a entender onde estamos e como podemos evoluir ainda mais juntos.<p>
-
         <p>Com a sua colaboração, conseguimos identificar pontos fortes, áreas de melhoria e oportunidades para dar aquele próximo passo rumo a uma operação mais eficiente e estratégica.<p>
-
         <p>📄 Relatório em mãos!<p>
-
         <p>Preparamos um material com os principais insights da análise::</p>
-
         <p><b>Gráfico de Radar - Nível Atual:</b></p>
-
         <img src="cid:fig_original" alt="Gráfico Original" style="width:600px;">
-
         <p><b>Gráfico de Radar - Normalizado:</b></p>
-
         <img src="cid:fig_normalizado" alt="Gráfico Normalizado" style="width:600px;">
-
         <p>Em anexo, você encontrará o questionário preenchido.</p>
-
         <hr>
-
         <h3>Relatório de Progresso</h3>
-
         <p>Você completou o Bloco <b>{grupo_atual_nome}</b>. Os resultados indicam que o seu nível de maturidade neste bloco é classificado como: <b>{nivel_atual}</b>.</p>
-
         <p>Para aprofundarmos a análise e oferecermos insights mais estratégicos, recomendamos que você complete também:</p>
-
         <p><b>{proximos_blocos_texto}</b></p>
-
         
-
         <h3>Trilha de Níveis de Maturidade</h3>
-
         {tabela_html}
-
         
-
         <p>E agora?<p>
-
         <p>Com base nisso, podemos montar juntos um plano de ação que faça sentido para o seu momento e gere resultados concretos.<p>
-
         <p>Se quiser trocar ideias, tirar dúvidas ou compartilhar sugestões, é só dar um alô — vamos adorar conversar com você!<p>
-
         <p>Abraços,<p>
-
         <p>Equipe Reali Consultoria<p>
-
         <p>contato@realiconsultoria.com.br<p>
-
         <p>41 3017 - 5001 PR<p>
-
         <p>11 3141 - 4500 SP<p>
-
         <p>47 3025 - 2900 SC<p>
-
         <p><a href="https://www.realiconsultoria.com.br">www.realiconsultoria.com.br</a></p>
-
         """
-
         msg.attach(MIMEText(corpo, 'html'))
 
 
@@ -1033,13 +860,9 @@ def mostrar_nivel_maturidade(total_porcentagem):
         st.warning("SEU NÍVEL ATUAL É: INICIAL")
 
         st.info("""
-
         **NIVEL DE MATURIDADE INICIAL:** Neste estágio, a organização opera de forma desestruturada, sem processos claramente definidos ou formalizados. 
-
         As atividades são executadas de maneira reativa, sem padronização ou diretrizes estabelecidas, tornando a execução dependente do conhecimento tácito de indivíduos, em vez de uma abordagem institucionalizada. 
-
         A ausência de controle efetivo e a inexistência de mecanismos de monitoramento resultam em vulnerabilidades operacionais e elevado risco de não conformidade regulatória.
-
         """)
 
     elif total_porcentagem < 51:
@@ -1049,13 +872,9 @@ def mostrar_nivel_maturidade(total_porcentagem):
         st.warning("SEU NÍVEL ATUAL É: ORGANIZAÇÃO")
 
         st.info("""
-
         **NIVEL DE MATURIDADE ORGANIZAÇÃO:** A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada. 
-
         Algumas diretrizes são documentadas e há um esforço para replicar práticas em diferentes áreas, embora a consistência na execução continue limitada. 
-
         As atividades ainda dependem fortemente da experiência individual, e a governança sobre os processos é mínima, resultando em baixa previsibilidade e dificuldade na identificação e mitigação de riscos sistêmicos.
-
         """)
 
     elif total_porcentagem < 71:
@@ -1065,15 +884,10 @@ def mostrar_nivel_maturidade(total_porcentagem):
         st.warning("SEU NÍVEL ATUAL É: CONSOLIDAÇÃO")
 
         st.info("""
-
         **NIVEL DE MATURIDADE CONSOLIDAÇÃO:** A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada. 
-
         Existe uma clareza maior sobre as responsabilidades e papéis, o que reduz a dependência do conhecimento individual. 
-
         A implementação de controles internos começa a ganhar robustez, permitindo um maior alinhamento com as diretrizes regulatórias e estratégicas. 
-
         Indicadores de desempenho são introduzidos, permitindo um acompanhamento inicial da eficácia operacional, embora a cultura de melhoria contínua ainda esteja em desenvolvimento.
-
         """)
 
     elif total_porcentagem < 90:
@@ -1083,15 +897,10 @@ def mostrar_nivel_maturidade(total_porcentagem):
         st.warning("SEU NÍVEL ATUAL É: OTIMIZAÇÃO")
 
         st.info("""
-
         **NIVEL DE MATURIDADE OTIMIZAÇÃO:** Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho. 
-
         A organização adota mecanismos formais de governança e controle, utilizando métricas para avaliação e aprimoramento das atividades. 
-
         A mitigação de riscos torna-se mais eficaz, com a implementação de políticas proativas para conformidade regulatória e excelência operacional. 
-
         O aprendizado organizacional é fomentado, garantindo a adaptação rápida a mudanças no ambiente interno e externo.
-
         """)
 
     elif total_porcentagem >= 91:
@@ -1101,15 +910,10 @@ def mostrar_nivel_maturidade(total_porcentagem):
         st.success("SEU NÍVEL ATUAL É: EXCELÊNCIA")
 
         st.info("""
-
         **NIVEL DE MATURIDADE EXCELÊNCIA:** A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação. 
-
         Os processos são constantemente avaliados e aprimorados com base em análise de dados e benchmarking, garantindo máxima eficiência e alinhamento estratégico. 
-
         Há uma integração plena entre tecnologia, governança e gestão de riscos, promovendo uma operação resiliente e altamente adaptável às mudanças do mercado e do cenário regulatório. 
-
         O comprometimento com a excelência e a sustentabilidade impulsiona a organização a atuar como referência no setor.
-
         """)
 
     
@@ -1129,7 +933,6 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: INICIAL")
 
         st.info("""
-
         **NIVEL DE MATURIDADE INICIAL:**
 
         Neste estágio, a organização opera de forma desestruturada, sem processes claramente definidos ou formalizados.
@@ -1147,7 +950,6 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: ORGANIZAÇÃO")
 
         st.info("""
-
         **NIVEL DE MATURIDADE ORGANIZAÇÃO:**
 
         A organização começa a estabelecer processos básicos, ainda que de maneira incipiente e pouco estruturada.
@@ -1165,7 +967,6 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: CONSOLIDAÇÃO")
 
         st.info("""
-
         **NIVEL DE MATURIDADE CONSOLIDAÇÃO:**
 
         A organização atinge um nível de maturidade em que os processos são formalmente documentados e seguidos de maneira estruturada.
@@ -1185,7 +986,6 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         st.warning(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: OTIMIZAÇÃO")
 
         st.info("""
-
         **NIVEL DE MATURIDADE OTIMIZAÇÃO:**
 
         Neste estágio, os processos estão plenamente integrados e gerenciados de maneira eficiente, com monitoramento contínuo e análise sistemática de desempenho.
@@ -1205,7 +1005,6 @@ def mostrar_nivel_atual_por_grupo(grupo, valor_percentual):
         st.success(f"SEU NÍVEL ATUAL NO GRUPO '{grupo}' É: EXCELÊNCIA")
 
         st.info("""
-
         **NIVEL DE MATURIDADE EXCELÊNCIA:**
 
         A organização alcança um nível de maturidade de referência, caracterizado por uma cultura de melhoria contínua e inovação.
@@ -1255,17 +1054,12 @@ fig_normalizado = None
 
 
 if not st.session_state.formulario_preenchido:
-
-    # Adicionando a imagem no início com tamanho reduzido
-
+    # Adicionando a imagem no início com tamanho reduzido - NOVA LOGO
     col1, col2 = st.columns([1, 1])
-
     with col1:
-
-        st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png", width=300)
-
+        # NOVA LOGO - usando a PNG do GitHub
+        st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/Branco%2C%20azul%20e%20perna%20cinza.png", width=300)
         st.header("DIAGNÓSTICO DE GESTÃO, GOVERNANÇA E CONTROLES")
-
         st.subheader("Preencha suas informações para iniciar:")
 
 
@@ -1311,275 +1105,140 @@ if not st.session_state.formulario_preenchido:
         # Bloco de apresentação profissional com background animado
 
         st.markdown("""
-
         <style>
-
         /* Fundo animado para o bloco de apresentação */
-
         .apresentacao-animada-bg {
-
             position: relative;
-
             overflow: hidden;
-
             background: linear-gradient(120deg, #f8fafc 60%, #e3e9f7 100%);
-
             border-radius: 18px;
-
             border: 1.5px solid #e0e0e0;
-
             padding: 32px 28px 22px 28px;
-
             margin-top: 18px;
-
             margin-bottom: 18px;
-
             box-shadow: 0 6px 24px rgba(44, 62, 80, 0.10);
-
             font-family: 'Segoe UI', 'Arial', sans-serif;
-
             z-index: 1;
-
         }
-
         /* Elementos animados no fundo */
-
         .apresentacao-animada-bg .bg-shape1,
-
         .apresentacao-animada-bg .bg-shape2,
-
         .apresentacao-animada-bg .bg-shape3 {
-
             position: absolute;
-
             border-radius: 50%;
-
             opacity: 0.18;
-
             z-index: 0;
-
             filter: blur(2px);
-
         }
-
         .apresentacao-animada-bg .bg-shape1 {
-
             width: 180px; height: 180px;
-
             background: #1976d2;
-
             top: -40px; left: -60px;
-
             animation: movebg1 8s infinite alternate;
-
         }
-
         .apresentacao-animada-bg .bg-shape2 {
-
             width: 120px; height: 120px;
-
             background: #43a047;
-
             bottom: -30px; right: -40px;
-
             animation: movebg2 10s infinite alternate;
-
         }
-
         .apresentacao-animada-bg .bg-shape3 {
-
             width: 90px; height: 90px;
-
             background: #fbc02d;
-
             top: 60px; right: 30px;
-
             animation: movebg3 12s infinite alternate;
-
         }
-
         @keyframes movebg1 {
-
             0% { transform: translateY(0) scale(1);}
-
             100% { transform: translateY(30px) scale(1.08);}
-
         }
-
         @keyframes movebg2 {
-
             0% { transform: translateX(0) scale(1);}
-
             100% { transform: translateX(-30px) scale(1.12);}
-
         }
-
         @keyframes movebg3 {
-
             0% { transform: translateY(0) translateX(0) scale(1);}
-
             100% { transform: translateY(-20px) translateX(20px) scale(1.05);}
-
         }
-
         .apresentacao-animada-bg h4 {
-
             color: #1a237e;
-
             margin-bottom: 14px;
-
             font-size: 1.25rem;
-
             font-weight: 700;
-
             z-index: 2;
-
             position: relative;
-
         }
-
         .apresentacao-animada-bg ul {
-
             margin-top: 0;
-
             margin-bottom: 0;
-
             padding-left: 18px;
-
             z-index: 2;
-
             position: relative;
-
         }
-
         .apresentacao-animada-bg li {
-
             margin-bottom: 6px;
-
             font-size: 1.05rem;
-
         }
-
         .apresentacao-animada-bg .dimensao {
-
             color: #0d47a1;
-
             font-weight: 600;
-
         }
-
         .apresentacao-animada-bg .subitem {
-
             color: #374151;
-
             font-size: 0.98rem;
-
         }
-
         .apresentacao-animada-bg p {
-
             margin-top: 16px;
-
             font-size: 1.08rem;
-
             color: #263238;
-
             z-index: 2;
-
             position: relative;
-
         }
-
         </style>
-
         <div class="apresentacao-animada-bg">
-
             <div class="bg-shape1"></div>
-
             <div class="bg-shape2"></div>
-
             <div class="bg-shape3"></div>
-
             <h4>Bem-vindo ao Diagnóstico de Maturidade Empresarial</h4>
-
             <p>
-
                 Esta ferramenta foi desenvolvida para proporcionar uma avaliação estratégica do nível de maturidade da sua empresa em três dimensões essenciais:
-
             </p>
-
             <ul>
-
                 <li class="dimensao">Gestão:
-
                     <ul>
-
                         <li class="subitem">Estrutura organizacional</li>
-
                         <li class="subitem">Eficiência financeira</li>
-
                     </ul>
-
                 </li>
-
                 <li class="dimensao">Governança:
-
                     <ul>
-
                         <li class="subitem">Gestão de processos</li>
-
                         <li class="subitem">Gestão de riscos</li>
-
                         <li class="subitem">Compliance regulatório</li>
-
                         <li class="subitem">Efetividade do canal de denúncias</li>
-
                     </ul>
-
                 </li>
-
                 <li class="dimensao">Áreas Operacionais:
-
                     <ul>
-
                         <li class="subitem">Recursos Humanos</li>
-
                         <li class="subitem">Tecnologia da Informação</li>
-
                         <li class="subitem">Gestão de compras e estoques</li>
-
                         <li class="subitem">Contabilidade e controles financeiros</li>
-
                         <li class="subitem">Logística e distribuição</li>
-
                     </ul>
-
                 </li>
-
             </ul>
-
             <p>
-
                 <b>Por que realizar este diagnóstico?</b><br>
-
                 A análise integrada destes aspectos permite identificar pontos fortes, oportunidades de melhoria e priorizar ações para o crescimento sustentável do seu negócio. 
-
                 Ao final, você receberá um relatório personalizado com recomendações práticas para elevar a maturidade da sua organização.
-
             </p>
-
             <p style="margin-top:10px; color:#1565c0;">
-
                 <b>Confidencialidade garantida:</b> Todas as informações fornecidas serão tratadas com total sigilo e utilizadas exclusivamente para fins de diagnóstico e orientação estratégica.
-
             </p>
-
         </div>
-
         """, unsafe_allow_html=True)
-
     with col2:
-
         st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/foto.jpg", use_container_width=True)
 
 
@@ -1719,87 +1378,46 @@ elif st.session_state.app_selecionado == "diagnostico":
 
 
             grupos = list(perguntas_hierarquicas.keys())
-
             
-
             # Criando navegação por grupos
-
             with st.sidebar:
-
                 
-
-                # Corrigindo o caminho da imagem para o URL bruto do GitHub
-
-                st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/logo.png")
-
+                # NOVA LOGO - usando a PNG do GitHub na sidebar
+                st.image("https://raw.githubusercontent.com/DaniloNs-creator/MATURITY/main/Branco%2C%20azul%20e%20perna%20cinza.png")
                 st.title("Navegação por Grupos")
-
                 
-
                 tab1, tab2, tab3 = st.tabs([ "GESTÃO", "GOVERNANÇA", "SETORES"])
-
                 
-
                 with tab1:
-
                     if st.button("**📊 Eficiência de Gestão**" if st.session_state.grupo_atual == 0 else "📊 Eficiência de Gestão"):
-
                         st.session_state.grupo_atual = 0
-
                     if st.button("**🏛️ Estruturas**" if st.session_state.grupo_atual == 1 else "🏛️ Estruturas"):
-
                         st.session_state.grupo_atual = 1    
-
                 
-
                 with tab2:
-
                     if st.button("**🔄 Gestão de Processos**" if st.session_state.grupo_atual == 2 else "🔄 Gestão de Processos"):
-
                         st.session_state.grupo_atual = 2
-
                     if st.button("**⚠️ Gestão de Riscos**" if st.session_state.grupo_atual == 3 else "⚠️ Gestão de Riscos"):
-
                         st.session_state.grupo_atual = 3
-
                     if st.button("**📝 Compliance**" if st.session_state.grupo_atual == 4 else "📝 Compliance"):
-
                         st.session_state.grupo_atual = 4
-
                     if st.button("**📢 Canal de Denúncias**" if st.session_state.grupo_atual == 5 else "📢 Canal de Denúncias"):
-
                         st.session_state.grupo_atual = 5
-
                     if st.button("**🏢 Governança Corporativa**" if st.session_state.grupo_atual == 6 else "🏢 Governança Corporativa"):
-
                         st.session_state.grupo_atual = 6
-
                 
-
                 with tab3:
-
                     if st.button("**👥 Recursos Humanos**" if st.session_state.grupo_atual == 7 else "👥 Recursos Humanos"):
-
                         st.session_state.grupo_atual = 7
-
                     if st.button("**💻 Tecnologia da Informação**" if st.session_state.grupo_atual == 8 else "💻 Tecnologia da Informação"):
-
                         st.session_state.grupo_atual = 8
-
                     if st.button("**🛒 Compras**" if st.session_state.grupo_atual == 9 else "🛒 Compras"):
-
                         st.session_state.grupo_atual = 9
-
                     if st.button("**📦 Estoques**" if st.session_state.grupo_atual == 10 else "📦 Estoques"):
-
                         st.session_state.grupo_atual = 10
-
                     if st.button("**💰 Contabilidade e Controle Financeiro**" if st.session_state.grupo_atual == 11 else "💰 Contabilidade e Controle Financeiro"):
-
                         st.session_state.grupo_atual = 11
-
                     if st.button("**🚚 Logística e Distribuição**" if st.session_state.grupo_atual == 12 else "🚚 Logística e Distribuição"):
-
                         st.session_state.grupo_atual = 12
 
 
@@ -1807,7 +1425,6 @@ elif st.session_state.app_selecionado == "diagnostico":
                 # Adicionar texto explicativo abaixo dos botões
 
                 st.write("""
-
                 Para garantir uma análise mais eficiente e resultados mais assertivos, recomendamos iniciar o diagnóstico pela aba 'Gestão', respondendo aos dois blocos de questões relacionados. 
 
                 Em seguida, prossiga para 'Governança' e, por fim, 'Setores'. 
@@ -2029,25 +1646,15 @@ elif st.session_state.app_selecionado == "diagnostico":
 
 
                 st.write(f"### {perguntas_hierarquicas[grupo]['titulo']}")
-
                 
-
                 # Verifica se todas as perguntas obrigatórias foram respondidas
-
                 todas_obrigatorias_preenchidas = True
-
                 obrigatorias_no_grupo = []
-
                 
-
                 for subitem, subpergunta in perguntas_hierarquicas[grupo]["subitens"].items():
-
                     if subitem in perguntas_obrigatorias:
-
                         obrigatorias_no_grupo.append(subitem)
-
                         if st.session_state.respostas.get(subitem, "Selecione") == "Selecione":
-
                             todas_obrigatorias_preenchidas = False
 
 
@@ -2253,7 +1860,6 @@ elif st.session_state.app_selecionado == "diagnostico":
                         # Exibir a mensagem
 
                         st.markdown(f"""
-
                         ### Relatório de Progresso
 
 
@@ -2568,9 +2174,8 @@ elif st.session_state.app_selecionado == "fpa":
 
     st.divider()
 
-
-
-    st.markdown('<div class="main-title">REALI PREMIUM</div>', unsafe_allow_html=True)
+    # ALTERADO: "REALI PREMIUM" foi substituído por "MATURITY REALI"
+    st.markdown('<div class="main-title">MATURITY REALI</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="sub-title">CFO & CEO | Painel Executivo de Indicadores (FP&A)</div>', unsafe_allow_html=True)
 
@@ -2605,25 +2210,15 @@ elif st.session_state.app_selecionado == "fpa":
             else:
 
                 st.metric("Índice", "0.00x")
-
                 
-
         with c2:
-
             st.subheader("Liquidez Seca")
-
             ls_ac = st.number_input("Ativo Circulante (R$)", 0.0, step=1000.0, key="ls_ac")
-
             ls_est = st.number_input("Estoques (R$)", 0.0, step=1000.0, key="ls_est")
-
             ls_pc = st.number_input("Passivo Circulante (R$)", 0.0, step=1000.0, key="ls_pc")
-
             if ls_pc > 0:
-
                 st.metric("Índice", f"{(ls_ac - ls_est) / ls_pc:.2f}x")
-
             else:
-
                 st.metric("Índice", "0.00x")
 
 
@@ -2683,23 +2278,14 @@ elif st.session_state.app_selecionado == "fpa":
             else:
 
                 st.metric("Margem Líquida", "0.00%")
-
                 
-
         with c6:
-
             st.subheader("ROA (Retorno s/ Ativo)")
-
             roa_ll = st.number_input("Lucro Líquido (R$)", 0.0, step=1000.0, key="roa_ll")
-
             roa_at = st.number_input("Ativo Total (R$)", 0.0, step=1000.0, key="roa_at")
-
             if roa_at > 0:
-
                 st.metric("ROA", f"{(roa_ll / roa_at) * 100:.2f}%")
-
             else:
-
                 st.metric("ROA", "0.00%")
 
 
@@ -2767,25 +2353,15 @@ elif st.session_state.app_selecionado == "fpa":
             else:
 
                 st.metric("PMP", "0 dias")
-
                 
-
         with c10:
-
             st.subheader("PME (Estoque)")
-
             pme_est = st.number_input("Estoque Médio (R$)", 0.0, step=1000.0, key="pme_est")
-
             pme_cmv = st.number_input("CMV Anual (R$)", 0.0, step=1000.0, key="pme_cmv")
-
             if pme_cmv > 0:
-
                 pme = (pme_est / pme_cmv) * 360
-
                 st.metric("PME", f"{pme:.0f} dias")
-
             else:
-
                 st.metric("PME", "0 dias")
 
 
@@ -2845,23 +2421,14 @@ elif st.session_state.app_selecionado == "fpa":
             else:
 
                 st.metric("Cobertura de Juros", "0.00x")
-
                 
-
         with c13:
-
             st.subheader("Composição do Endividamento")
-
             ce_pc = st.number_input("Passivo Circulante (R$)", 0.0, step=1000.0, key="ce_pc2")
-
             ce_pt = st.number_input("Passivo Exigível Total (R$)", 0.0, step=1000.0, key="ce_pt")
-
             if ce_pt > 0:
-
                 st.metric("Dívida Curto Prazo (%)", f"{(ce_pc / ce_pt) * 100:.2f}%")
-
             else:
-
                 st.metric("Dívida Curto Prazo (%)", "0.00%")
 
 
@@ -2915,15 +2482,10 @@ elif st.session_state.app_selecionado == "fpa":
 
 
     st.markdown("""
-
         <div style='text-align: center; color: #94A3B8; font-size: 0.85rem; padding-top: 20px;'>
-
-            <b>REALI PREMIUM Consultoria Especializada</b><br>
-
+            <b>MATURITY REALI Consultoria Especializada</b><br>
             <i>Ferramenta de uso restrito para análise financeira avançada e controladoria executiva.</i>
-
         </div>
-
     """, unsafe_allow_html=True)
 
 
