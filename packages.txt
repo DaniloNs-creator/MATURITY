@@ -1,4 +1,0 @@
-default-jre
-libmagic1
-chromium
-chromium-driver
