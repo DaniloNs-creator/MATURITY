@@ -35,11 +35,18 @@ import streamlit as st
 # ──────────────────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO
 # ──────────────────────────────────────────────────────────────────────────
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confiabil.db")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "confiabil.db")
+
+# Identidade visual (Reali)
+LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
+WATERMARK_PATH = os.path.join(BASE_DIR, "assets", "watermark_logo.png")
+HERO_PATH = os.path.join(BASE_DIR, "foto.jpg")
+FAVICON_PATH = os.path.join(BASE_DIR, "assets", "favicon.png")
 
 st.set_page_config(
     page_title="Confiábil | Painel de Controle 2026",
-    page_icon="📊",
+    page_icon=FAVICON_PATH if os.path.exists(FAVICON_PATH) else "📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -47,17 +54,39 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        .main { background-color: #f7f8fa; }
-        [data-testid="stSidebar"] { background-color: #10233f; }
+        :root {
+            --reali-navy: #10233f;
+            --reali-navy-dark: #0b1b30;
+            --reali-blue: #1b89fa;
+            --reali-bg: #f7f8fa;
+        }
+        .main { background-color: var(--reali-bg); }
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, var(--reali-navy) 0%, var(--reali-navy-dark) 100%);
+        }
         [data-testid="stSidebar"] * { color: #e8edf5 !important; }
         [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.15); }
-        h1, h2, h3 { color: #10233f; font-family: "Segoe UI", sans-serif; }
+        [data-testid="stSidebar"] img { border-radius: 6px; }
+        .sidebar-brand-caption { opacity: .75; letter-spacing: .04em; text-transform: uppercase; font-size: .72rem; }
+        .sidebar-footer { opacity: .55; font-size: .72rem; text-align: center; }
+        h1, h2, h3 { color: var(--reali-navy); font-family: "Segoe UI", sans-serif; }
+        a { color: var(--reali-blue) !important; }
+        button[kind="primary"], button[kind="primaryFormSubmit"],
+        [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"],
+        [data-testid="stDownloadButton"] button {
+            background-color: var(--reali-blue) !important; border-color: var(--reali-blue) !important;
+        }
+        [data-testid="stRadioOption"][data-selected="true"] > div > div > div:first-child {
+            background-color: var(--reali-blue) !important;
+        }
         .kpi-card {
             background: #ffffff; border-radius: 12px; padding: 18px 20px;
             border: 1px solid #e6e9ef; box-shadow: 0 1px 3px rgba(16,35,63,0.06);
+            transition: box-shadow .15s ease, transform .15s ease;
         }
+        .kpi-card:hover { box-shadow: 0 6px 16px rgba(16,35,63,0.10); transform: translateY(-1px); }
         .kpi-label { font-size: 0.80rem; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
-        .kpi-value { font-size: 1.9rem; color: #10233f; font-weight: 700; }
+        .kpi-value { font-size: 1.9rem; color: var(--reali-navy); font-weight: 700; }
         .kpi-sub   { font-size: 0.78rem; color: #9aa4b2; }
         .placeholder-box {
             background:#fff8e6; border:1px solid #f0d78c; border-radius:10px;
@@ -67,7 +96,7 @@ st.markdown(
             border:1px solid #e6e9ef; border-radius:8px; padding:6px 8px; min-height:70px;
             background:#fff; font-size:0.8rem;
         }
-        .day-num { font-weight:700; color:#10233f; }
+        .day-num { font-weight:700; color:var(--reali-navy); }
         .stTabs [data-baseweb="tab"] { font-weight: 600; }
     </style>
     """,
@@ -551,7 +580,12 @@ def kpi_card(label: str, value: str, sub: str = ""):
 # PÁGINA: PAINEL
 # ──────────────────────────────────────────────────────────────────────────
 def pagina_painel():
-    st.title("📊 Painel de Controle 2026")
+    col_logo, col_titulo = st.columns([1, 8])
+    with col_logo:
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=90)
+    with col_titulo:
+        st.title("📊 Painel de Controle 2026")
     st.caption(f"Confiábil · Banco: {os.path.basename(DB_PATH)} · "
                f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
@@ -737,6 +771,10 @@ def pagina_placeholder(nome: str):
     st.markdown(f'<div class="placeholder-box">{PLACEHOLDERS[nome]}</div>', unsafe_allow_html=True)
     st.caption("Aba criada como estrutura inicial, replicando o estado do arquivo original. "
                "Me diga o formato desejado (colunas, regras) e eu monto a estrutura completa.")
+    if os.path.exists(WATERMARK_PATH):
+        _, col_marca, _ = st.columns([1, 2, 1])
+        with col_marca:
+            st.image(WATERMARK_PATH, width='stretch')
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -909,25 +947,33 @@ def pagina_lista_empresas():
 # ──────────────────────────────────────────────────────────────────────────
 def pagina_legenda():
     st.title("ℹ️ Legenda e Instruções")
-    st.markdown(
-        """
-        | Campo | Descrição |
-        |---|---|
-        | **Código Domínio** | Código da empresa no Sistema Domínio. |
-        | **CNPJ** | CNPJ completo, importado da Lista de Empresas. |
-        | **Razão Social** | Nome da empresa. |
-        | **Status** | Situação da entrega/obrigação no mês: `▲ Entregue`, `▼ Atrasado`, `● Pendente`, `○ N/A`. |
-        | **Link** | Caminho ou URL do arquivo (rede, OneDrive, SharePoint, Google Drive). |
-        | **Extratos Recebidos** | Só na aba Contabilidade: se os extratos bancários do período já foram recebidos do cliente (mesmo dropdown de Status). |
-        | **ECD / ECF** | Só na aba Contabilidade: Escrituração Contábil Digital e Fiscal, entregas anuais (Status + Link, sem Extratos). |
-        | **% Conclusão** | `▲ Entregue` dividido pelo total preenchido (excluindo N/A). Na Contabilidade, soma Status **e** Extratos igualmente. |
-        """
-    )
-    st.info(
-        "Todos os dados são gravados em um banco **SQLite** local (`confiabil.db`), no mesmo "
-        "diretório do app — sobrevivem a reinícios. Use **Exportar tudo para Excel** no Painel "
-        "para gerar um arquivo `.xlsx` a qualquer momento."
-    )
+
+    col_texto, col_foto = st.columns([3, 1]) if os.path.exists(HERO_PATH) else (st.container(), None)
+    with col_texto:
+        st.markdown(
+            """
+            | Campo | Descrição |
+            |---|---|
+            | **Código Domínio** | Código da empresa no Sistema Domínio. |
+            | **CNPJ** | CNPJ completo, importado da Lista de Empresas. |
+            | **Razão Social** | Nome da empresa. |
+            | **Status** | Situação da entrega/obrigação no mês: `▲ Entregue`, `▼ Atrasado`, `● Pendente`, `○ N/A`. |
+            | **Link** | Caminho ou URL do arquivo (rede, OneDrive, SharePoint, Google Drive). |
+            | **Extratos Recebidos** | Só na aba Contabilidade: se os extratos bancários do período já foram recebidos do cliente (mesmo dropdown de Status). |
+            | **ECD / ECF** | Só na aba Contabilidade: Escrituração Contábil Digital e Fiscal, entregas anuais (Status + Link, sem Extratos). |
+            | **% Conclusão** | `▲ Entregue` dividido pelo total preenchido (excluindo N/A). Na Contabilidade, soma Status **e** Extratos igualmente. |
+            """
+        )
+        st.info(
+            "Todos os dados são gravados em um banco **SQLite** local (`confiabil.db`), no mesmo "
+            "diretório do app — sobrevivem a reinícios. Use **Exportar tudo para Excel** no Painel "
+            "para gerar um arquivo `.xlsx` a qualquer momento."
+        )
+    if col_foto is not None:
+        with col_foto:
+            st.image(HERO_PATH, width='stretch')
+            st.caption("Confiábil — controle centralizado das entregas contábeis, fiscais, "
+                       "de RH e societárias da carteira de clientes.")
 
 
 
@@ -938,14 +984,22 @@ def main():
     init_db()
 
     with st.sidebar:
-        st.markdown("## Confiábil")
-        st.caption("Painel de Controle 2026")
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=160)
+        else:
+            st.markdown("## Confiábil")
+        st.markdown('<div class="sidebar-brand-caption">Confiábil · Painel de Controle 2026</div>',
+                    unsafe_allow_html=True)
         st.divider()
         rotulos = [f"{icone}  {nome}" for icone, nome in MENU]
         escolha = st.radio("Navegação", rotulos, label_visibility="collapsed")
         nome_pagina = escolha.split("  ", 1)[1]
         st.divider()
         st.caption(f"Banco: `{os.path.basename(DB_PATH)}`")
+        st.markdown(
+            f'<div class="sidebar-footer">© {datetime.now().year} Reali · Confiábil</div>',
+            unsafe_allow_html=True,
+        )
 
     if nome_pagina == "Painel":
         pagina_painel()
