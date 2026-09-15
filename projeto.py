@@ -1,23 +1,42 @@
 # -*- coding: utf-8 -*-
 """
 Confiábil — Painel de Controle 2026
-Réplica em Python/Streamlit do controle de entregas por área
+Réplica fiel em Python/Streamlit + SQLite do controle de entregas por área
 (Contabilidade, Fiscal, Recursos Humanos, Societário) para 137 empresas ativas.
 
+Estrutura replicada da planilha original (verificada campo a campo):
+  - Contabilidade: por mês -> Status(Balancete) + Link + Extratos Recebidos + Link(Extrato)
+                    anual  -> Status(ECD) + Link, Status(ECF) + Link
+                    % Conclusão conta Status E Extratos igualmente (26 campos)
+  - Fiscal / RH / Societário: por mês -> Status + Link (12 meses, sem Extratos)
+                    % Conclusão conta apenas os 12 campos de Status
+  - Agenda: Reuniões Agendadas + Saídas Particulares (tabelas próprias) + calendário mensal
+  - Relatórios / Declarações / Reembolso: abas placeholder (estrutura a definir)
+
+Persistência: banco SQLite local (confiabil.db), criado e populado automaticamente
+na primeira execução. Os dados sobrevivem a reinícios do app (diferente de
+st.session_state, que se perde ao fechar a aba do navegador).
+
 Execução:
-    pip install streamlit pandas openpyxl xlsxwriter
+    pip install -r requirements.txt
     streamlit run app.py
 """
 
+import contextlib
 import io
-from datetime import datetime
+import os
+import sqlite3
+from datetime import datetime, date
+import calendar as pycalendar
 
 import pandas as pd
 import streamlit as st
 
 # ──────────────────────────────────────────────────────────────────────────
-# CONFIGURAÇÃO DA PÁGINA
+# CONFIGURAÇÃO
 # ──────────────────────────────────────────────────────────────────────────
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confiabil.db")
+
 st.set_page_config(
     page_title="Confiábil | Painel de Controle 2026",
     page_icon="📊",
@@ -25,47 +44,37 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ──────────────────────────────────────────────────────────────────────────
-# CSS — identidade visual profissional
-# ──────────────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
         .main { background-color: #f7f8fa; }
-        [data-testid="stSidebar"] {
-            background-color: #10233f;
-        }
+        [data-testid="stSidebar"] { background-color: #10233f; }
         [data-testid="stSidebar"] * { color: #e8edf5 !important; }
-        [data-testid="stSidebar"] .stRadio label:hover { color: #ffffff !important; }
         [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.15); }
-
         h1, h2, h3 { color: #10233f; font-family: "Segoe UI", sans-serif; }
-
         .kpi-card {
-            background: #ffffff;
-            border-radius: 12px;
-            padding: 18px 20px;
-            border: 1px solid #e6e9ef;
-            box-shadow: 0 1px 3px rgba(16,35,63,0.06);
+            background: #ffffff; border-radius: 12px; padding: 18px 20px;
+            border: 1px solid #e6e9ef; box-shadow: 0 1px 3px rgba(16,35,63,0.06);
         }
         .kpi-label { font-size: 0.80rem; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
         .kpi-value { font-size: 1.9rem; color: #10233f; font-weight: 700; }
         .kpi-sub   { font-size: 0.78rem; color: #9aa4b2; }
-
-        .area-badge {
-            display:inline-block; padding: 2px 10px; border-radius: 999px;
-            font-size: 0.75rem; font-weight: 600; background:#eaf1ff; color:#1d4ed8;
+        .placeholder-box {
+            background:#fff8e6; border:1px solid #f0d78c; border-radius:10px;
+            padding:16px 20px; color:#6b5300;
         }
+        .day-cell {
+            border:1px solid #e6e9ef; border-radius:8px; padding:6px 8px; min-height:70px;
+            background:#fff; font-size:0.8rem;
+        }
+        .day-num { font-weight:700; color:#10233f; }
         .stTabs [data-baseweb="tab"] { font-weight: 600; }
-        section[data-testid="stDataFrameResizable"] { border-radius: 10px; overflow:hidden; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ──────────────────────────────────────────────────────────────────────────
-# DADOS BASE — Lista de Empresas (extraída do arquivo original, sem CPF)
-# ──────────────────────────────────────────────────────────────────────────
+
 EMPRESAS_CSV = """codigo,cnpj,razao_social,municipio,regime,atividade,responsavel,contato,telefone,email
 1,82.016.981/0001-20,ARRATA & ARRATA LTDA,CURITIBA-PR,SIMPLES,SERVIÇOS,CARMEN REGINA ARRATA,CARMEN,(41) 99199-7744,carmen@vctpromo.com
 1.2,82.016.981/0002-00,ARRATA & ARRATA LTDA (Filial Armazém do Jardim),CURITIBA-PR,SIMPLES,SERVIÇOS,CARMEN REGINA ARRATA,CARMEN,(41) 99199-7744,carmen@vctpromo.com
@@ -206,18 +215,39 @@ EMPRESAS_CSV = """codigo,cnpj,razao_social,municipio,regime,atividade,responsave
 233,67.688.850/0001-03,FENIX IR CONVENIENCIAS LTDA,CURITIBA-PR,SIMPLES,COMÉRCIO,IVANIR DOS ANJOS RODRIGUES,IVANIR,(41) 99199-7744,ivanir@example.com
 """
 
+# ──────────────────────────────────────────────────────────────────────────
+# CONSTANTES
+# ──────────────────────────────────────────────────────────────────────────
 MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+MES_NUM = {m: i + 1 for i, m in enumerate(MESES)}
 STATUS_OPTIONS = ["", "▲ Entregue", "▼ Atrasado", "● Pendente", "○ N/A"]
 
 AREAS = {
-    "Contabilidade": {"icone": "📗", "extras": ["ECD", "ECF"], "tem_extratos": True,
-                       "descricao": "Balancete Mensal + Extratos + ECD/ECF"},
-    "Fiscal": {"icone": "💰", "extras": [], "tem_extratos": False,
-               "descricao": "Obrigações Fiscais Mensais"},
-    "Recursos Humanos": {"icone": "👥", "extras": [], "tem_extratos": False,
-                          "descricao": "Rotinas de RH Mensais (folha, eSocial etc.)"},
-    "Societário": {"icone": "🏛️", "extras": [], "tem_extratos": False,
-                   "descricao": "Atos Societários"},
+    "Contabilidade": {
+        "icone": "📗", "tem_extratos": True, "periodos_extra": ["ECD", "ECF"],
+        "descricao": "Status(Balancete) + Link + Extratos Recebidos + Link(Extrato) por mês, "
+                     "e ECD / ECF anuais.",
+    },
+    "Fiscal": {
+        "icone": "💰", "tem_extratos": False, "periodos_extra": [],
+        "descricao": "Status + Link de obrigações fiscais mensais.",
+    },
+    "Recursos Humanos": {
+        "icone": "👥", "tem_extratos": False, "periodos_extra": [],
+        "descricao": "Status + Link de rotinas de RH mensais (folha, eSocial etc.).",
+    },
+    "Societário": {
+        "icone": "🏛️", "tem_extratos": False, "periodos_extra": [],
+        "descricao": "Status + Link de atos societários.",
+    },
+}
+
+PLACEHOLDERS = {
+    "Relatórios": "🚧 Aqui você poderá ver relatórios consolidados de todas as áreas. "
+                  "Estrutura a definir.",
+    "Declarações": "🚧 Controle de entregas de declarações (SPED, DIRF, RAIS etc.) — "
+                   "estrutura a definir.",
+    "Reembolso": "🚧 Controle de solicitações e pagamentos de reembolso — estrutura a definir.",
 }
 
 MENU = [
@@ -226,75 +256,277 @@ MENU = [
     ("💰", "Fiscal"),
     ("👥", "Recursos Humanos"),
     ("🏛️", "Societário"),
+    ("📄", "Relatórios"),
+    ("📄", "Declarações"),
+    ("💵", "Reembolso"),
+    ("📅", "Agenda"),
     ("🧑", "Lista de Empresas"),
     ("ℹ️", "Legenda"),
 ]
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# CARREGAMENTO DE DADOS / ESTADO DA SESSÃO
+# CAMADA DE BANCO DE DADOS (SQLite)
 # ──────────────────────────────────────────────────────────────────────────
-@st.cache_data
+@contextlib.contextmanager
+def get_conn():
+    """Conexão com commit automático e fechamento garantido."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_db():
+    """Cria o schema (idempotente) e popula dados na primeira execução."""
+    with get_conn() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS empresas (
+                codigo         TEXT PRIMARY KEY,
+                cnpj           TEXT NOT NULL,
+                razao_social   TEXT NOT NULL,
+                municipio      TEXT,
+                regime         TEXT,
+                atividade      TEXT,
+                responsavel    TEXT,
+                contato        TEXT,
+                telefone       TEXT,
+                email          TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS entregas (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                empresa_codigo   TEXT NOT NULL REFERENCES empresas(codigo) ON DELETE CASCADE,
+                area             TEXT NOT NULL,
+                periodo          TEXT NOT NULL,
+                status           TEXT NOT NULL DEFAULT '',
+                link             TEXT NOT NULL DEFAULT '',
+                extratos_status  TEXT NOT NULL DEFAULT '',
+                extratos_link    TEXT NOT NULL DEFAULT '',
+                atualizado_em    TEXT,
+                UNIQUE(empresa_codigo, area, periodo)
+            );
+            CREATE INDEX IF NOT EXISTS idx_entregas_area ON entregas(area);
+            CREATE INDEX IF NOT EXISTS idx_entregas_empresa ON entregas(empresa_codigo);
+
+            CREATE TABLE IF NOT EXISTS reunioes (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                data           TEXT NOT NULL,
+                horario        TEXT,
+                titulo         TEXT NOT NULL,
+                participantes  TEXT,
+                local          TEXT,
+                teams          TEXT,
+                observacoes    TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS saidas (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                data              TEXT NOT NULL,
+                saida             TEXT,
+                retorno_previsto  TEXT,
+                responsavel       TEXT,
+                motivo            TEXT,
+                observacoes       TEXT
+            );
+            """
+        )
+    _seed_empresas_if_empty()
+    _seed_entregas_if_empty()
+
+
+def _seed_empresas_if_empty():
+    with get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM empresas").fetchone()[0]
+        if n == 0:
+            df = pd.read_csv(io.StringIO(EMPRESAS_CSV))
+            df.to_sql("empresas", conn, if_exists="append", index=False)
+
+
+def _seed_entregas_if_empty():
+    with get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM entregas").fetchone()[0]
+        if n > 0:
+            return
+        codigos = [r[0] for r in conn.execute("SELECT codigo FROM empresas").fetchall()]
+        registros = []
+        for codigo in codigos:
+            for area, cfg in AREAS.items():
+                for periodo in MESES + cfg["periodos_extra"]:
+                    registros.append((codigo, area, periodo))
+        conn.executemany(
+            "INSERT OR IGNORE INTO entregas (empresa_codigo, area, periodo) VALUES (?, ?, ?)",
+            registros,
+        )
+
+
 def carregar_empresas() -> pd.DataFrame:
-    df = pd.read_csv(io.StringIO(EMPRESAS_CSV))
-    df["codigo"] = df["codigo"].astype(str)
-    return df
+    with get_conn() as conn:
+        return pd.read_sql_query("SELECT * FROM empresas ORDER BY CAST(codigo AS TEXT)", conn)
 
 
-def montar_df_area(area: str) -> pd.DataFrame:
-    """Cria a grade (empresa × meses) de uma área, com colunas de Status
-    (e Extratos, quando aplicável)."""
-    base = carregar_empresas()[["codigo", "cnpj", "razao_social", "regime", "responsavel"]].copy()
-    for mes in MESES:
-        base[f"{mes} · Status"] = ""
-        if AREAS[area]["tem_extratos"]:
-            base[f"{mes} · Extratos"] = ""
-    for extra in AREAS[area]["extras"]:
-        base[f"{extra} · Status"] = ""
-    return base
+def carregar_grid(area: str) -> pd.DataFrame:
+    """Monta a grade larga (empresa × período) de uma área a partir do banco."""
+    cfg = AREAS[area]
+    with get_conn() as conn:
+        long_df = pd.read_sql_query(
+            """
+            SELECT e.codigo, e.cnpj, e.razao_social, e.regime, e.responsavel,
+                   t.periodo, t.status, t.link, t.extratos_status, t.extratos_link
+            FROM empresas e
+            JOIN entregas t ON t.empresa_codigo = e.codigo
+            WHERE t.area = ?
+            """,
+            conn,
+            params=(area,),
+        )
+    fixed = (
+        long_df[["codigo", "cnpj", "razao_social", "regime", "responsavel"]]
+        .drop_duplicates()
+        .set_index("codigo")
+    )
+    wide = fixed.copy()
+    for periodo in MESES + cfg["periodos_extra"]:
+        sub = long_df[long_df["periodo"] == periodo].set_index("codigo")
+        wide[f"{periodo} · Status"] = sub["status"]
+        wide[f"{periodo} · Link"] = sub["link"]
+        if cfg["tem_extratos"] and periodo in MESES:
+            wide[f"{periodo} · Extratos"] = sub["extratos_status"]
+            wide[f"{periodo} · Link Extrato"] = sub["extratos_link"]
+    return wide.reset_index()
 
 
-def inicializar_estado():
-    if "empresas" not in st.session_state:
-        st.session_state["empresas"] = carregar_empresas()
-    for area in AREAS:
-        chave = f"df_{area}"
-        if chave not in st.session_state:
-            st.session_state[chave] = montar_df_area(area)
+def salvar_grid(area: str, df_editado: pd.DataFrame, periodos: list):
+    """Grava de volta no SQLite as células editadas de uma aba/trimestre."""
+    cfg = AREAS[area]
+    agora = datetime.now().isoformat(timespec="seconds")
+    registros = []
+    for _, row in df_editado.iterrows():
+        for periodo in periodos:
+            status = row.get(f"{periodo} · Status", "") or ""
+            link = row.get(f"{periodo} · Link", "") or ""
+            if cfg["tem_extratos"] and periodo in MESES:
+                extratos_status = row.get(f"{periodo} · Extratos", "") or ""
+                extratos_link = row.get(f"{periodo} · Link Extrato", "") or ""
+            else:
+                extratos_status = extratos_link = ""
+            registros.append(
+                (status, link, extratos_status, extratos_link, agora,
+                 row["codigo"], area, periodo)
+            )
+    with get_conn() as conn:
+        conn.executemany(
+            """
+            UPDATE entregas
+               SET status = ?, link = ?, extratos_status = ?, extratos_link = ?, atualizado_em = ?
+             WHERE empresa_codigo = ? AND area = ? AND periodo = ?
+            """,
+            registros,
+        )
 
 
-def colunas_status(df: pd.DataFrame) -> list:
-    return [c for c in df.columns if c.endswith("· Status")]
-
-
-def calcular_conclusao(df: pd.DataFrame) -> pd.Series:
-    cols = colunas_status(df)
-    if not cols:
-        return pd.Series([0.0] * len(df), index=df.index)
-    sub = df[cols]
+def calcular_conclusao(area: str, wide_df: pd.DataFrame) -> pd.Series:
+    """Replica exatamente a fórmula original: %Entregue / (preenchidos - N/A),
+    contando Status E Extratos igualmente quando a área os possui (Contabilidade)."""
+    cfg = AREAS[area]
+    campos = []
+    for periodo in MESES:
+        campos.append(f"{periodo} · Status")
+        if cfg["tem_extratos"]:
+            campos.append(f"{periodo} · Extratos")
+    for extra in cfg["periodos_extra"]:
+        campos.append(f"{extra} · Status")
+    sub = wide_df[campos]
     entregues = (sub == "▲ Entregue").sum(axis=1)
     preenchidos = (sub != "").sum(axis=1)
     nao_aplicaveis = (sub == "○ N/A").sum(axis=1)
     denom = (preenchidos - nao_aplicaveis).replace(0, pd.NA)
-    pct = (entregues / denom).fillna(0.0).astype(float)
-    return pct
+    return (entregues / denom).fillna(0.0).astype(float)
+
+
+def contar_status(area: str, status_alvo: str) -> pd.DataFrame:
+    """Conta quantas ocorrências de um status (ex: Atrasado) cada empresa tem na área."""
+    df = carregar_grid(area)
+    cols_status = [c for c in df.columns if c.endswith("· Status") or c.endswith("· Extratos")]
+    contagem = (df[cols_status] == status_alvo).sum(axis=1)
+    return pd.DataFrame({"razao_social": df["razao_social"], "responsavel": df["responsavel"],
+                          "Área": area, "Qtd": contagem})[lambda d: d["Qtd"] > 0]
+
+
+# ---- Agenda: Reuniões e Saídas -------------------------------------------
+def carregar_reunioes() -> pd.DataFrame:
+    with get_conn() as conn:
+        return pd.read_sql_query("SELECT * FROM reunioes ORDER BY data, horario", conn)
+
+
+def carregar_saidas() -> pd.DataFrame:
+    with get_conn() as conn:
+        return pd.read_sql_query("SELECT * FROM saidas ORDER BY data", conn)
+
+
+def adicionar_reuniao(data_, horario, titulo, participantes, local, teams, obs):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO reunioes (data, horario, titulo, participantes, local, teams, observacoes) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (data_, horario, titulo, participantes, local, teams, obs),
+        )
+
+
+def adicionar_saida(data_, saida, retorno, responsavel, motivo, obs):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO saidas (data, saida, retorno_previsto, responsavel, motivo, observacoes) "
+            "VALUES (?,?,?,?,?,?)",
+            (data_, saida, retorno, responsavel, motivo, obs),
+        )
+
+
+def excluir_registro(tabela: str, id_: int):
+    assert tabela in ("reunioes", "saidas")
+    with get_conn() as conn:
+        conn.execute(f"DELETE FROM {tabela} WHERE id = ?", (id_,))
+
+
+def adicionar_empresa(dados: dict):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO empresas (codigo, cnpj, razao_social, municipio, regime,
+                                      atividade, responsavel, contato, telefone, email)
+               VALUES (:codigo, :cnpj, :razao_social, :municipio, :regime,
+                       :atividade, :responsavel, :contato, :telefone, :email)""",
+            dados,
+        )
+    with get_conn() as conn:
+        for area, cfg in AREAS.items():
+            for periodo in MESES + cfg["periodos_extra"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO entregas (empresa_codigo, area, periodo) VALUES (?,?,?)",
+                    (dados["codigo"], area, periodo),
+                )
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# EXPORTAÇÃO PARA EXCEL
+# EXPORTAÇÃO PARA EXCEL (fiel à estrutura original)
 # ──────────────────────────────────────────────────────────────────────────
 def gerar_excel() -> bytes:
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        st.session_state["empresas"].to_excel(writer, sheet_name="Lista Empresas", index=False)
-        for area in AREAS:
-            df = st.session_state[f"df_{area}"].copy()
-            df["% Conclusão"] = (calcular_conclusao(df) * 100).round(1)
+        carregar_empresas().to_excel(writer, sheet_name="Lista Empresas", index=False)
+        for area, cfg in AREAS.items():
+            df = carregar_grid(area)
+            df["% Conclusão"] = (calcular_conclusao(area, df) * 100).round(1)
             df.to_excel(writer, sheet_name=area[:31], index=False)
-        workbook = writer.book
-        header_fmt = workbook.add_format(
-            {"bold": True, "bg_color": "#10233f", "font_color": "white", "border": 1}
-        )
+        reun = carregar_reunioes()
+        if not reun.empty:
+            reun.to_excel(writer, sheet_name="Agenda - Reuniões", index=False)
+        said = carregar_saidas()
+        if not said.empty:
+            said.to_excel(writer, sheet_name="Agenda - Saídas", index=False)
         for sheet in writer.sheets.values():
             sheet.freeze_panes(1, 5)
     buffer.seek(0)
@@ -302,29 +534,31 @@ def gerar_excel() -> bytes:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# COMPONENTES DE UI
+# COMPONENTES
 # ──────────────────────────────────────────────────────────────────────────
 def kpi_card(label: str, value: str, sub: str = ""):
     st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">{label}</div>
-            <div class="kpi-value">{value}</div>
-            <div class="kpi-sub">{sub}</div>
-        </div>
-        """,
+        f"""<div class="kpi-card">
+                <div class="kpi-label">{label}</div>
+                <div class="kpi-value">{value}</div>
+                <div class="kpi-sub">{sub}</div>
+            </div>""",
         unsafe_allow_html=True,
     )
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# PÁGINA: PAINEL
+# ──────────────────────────────────────────────────────────────────────────
 def pagina_painel():
     st.title("📊 Painel de Controle 2026")
-    st.caption(f"Confiábil · Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    st.caption(f"Confiábil · Banco: {os.path.basename(DB_PATH)} · "
+               f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
-    empresas = st.session_state["empresas"]
+    empresas = carregar_empresas()
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        kpi_card("Empresas Ativas", f"{len(empresas)}", "cadastradas no sistema")
+        kpi_card("Empresas Ativas", f"{len(empresas)}", "cadastradas no banco")
     with col2:
         kpi_card("Responsáveis", f"{empresas['responsavel'].nunique()}", "distintos")
     with col3:
@@ -336,8 +570,8 @@ def pagina_painel():
     st.markdown("### Conclusão por área")
     resumo = []
     for area in AREAS:
-        df = st.session_state[f"df_{area}"]
-        pct = calcular_conclusao(df).mean() * 100
+        df = carregar_grid(area)
+        pct = calcular_conclusao(area, df).mean() * 100
         resumo.append({"Área": f"{AREAS[area]['icone']} {area}", "% Conclusão": round(pct, 1)})
     resumo_df = pd.DataFrame(resumo).set_index("Área")
     c1, c2 = st.columns([2, 1])
@@ -348,14 +582,14 @@ def pagina_painel():
             resumo_df.style.format({"% Conclusão": "{:.1f}%"}).background_gradient(
                 cmap="RdYlGn", vmin=0, vmax=100
             ),
-            use_container_width=True,
+            width='stretch',
         )
 
     st.markdown("### Empresas com pendências / atrasos")
     linhas = []
     for area in AREAS:
-        df = st.session_state[f"df_{area}"]
-        cols = colunas_status(df)
+        df = carregar_grid(area)
+        cols = [c for c in df.columns if c.endswith("· Status") or c.endswith("· Extratos")]
         atrasos = (df[cols] == "▼ Atrasado").sum(axis=1)
         pendentes = (df[cols] == "● Pendente").sum(axis=1)
         tmp = df[["razao_social", "responsavel"]].copy()
@@ -363,13 +597,13 @@ def pagina_painel():
         tmp["Atrasados"] = atrasos
         tmp["Pendentes"] = pendentes
         linhas.append(tmp[(atrasos > 0) | (pendentes > 0)])
-    if linhas:
-        alerta = pd.concat(linhas, ignore_index=True)
-        if len(alerta):
-            alerta = alerta.sort_values("Atrasados", ascending=False)
-            st.dataframe(alerta, use_container_width=True, hide_index=True)
-        else:
-            st.success("Nenhuma pendência ou atraso registrado no momento. ✅")
+    alerta = pd.concat(linhas, ignore_index=True) if linhas else pd.DataFrame()
+    if len(alerta):
+        st.dataframe(alerta.sort_values("Atrasados", ascending=False),
+                     width='stretch', hide_index=True)
+    else:
+        st.success("Nenhuma pendência ou atraso registrado no momento. ✅")
+
     st.divider()
     st.download_button(
         "⬇️ Exportar tudo para Excel",
@@ -379,15 +613,16 @@ def pagina_painel():
     )
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# PÁGINA: ÁREAS OPERACIONAIS (Contabilidade / Fiscal / RH / Societário)
+# ──────────────────────────────────────────────────────────────────────────
 def pagina_area(area: str):
     cfg = AREAS[area]
     st.title(f"{cfg['icone']} {area} 2026")
-    st.caption(cfg["descricao"] + " — Base: 137 empresas ativas.")
+    st.caption(cfg["descricao"] + " Base: 137 empresas ativas — dados no SQLite (`confiabil.db`).")
 
-    chave = f"df_{area}"
-    df_full = st.session_state[chave]
+    df_full = carregar_grid(area)
 
-    # filtros
     fcol1, fcol2, fcol3 = st.columns([2, 1, 1])
     with fcol1:
         busca = st.text_input("🔎 Buscar por razão social ou CNPJ", key=f"busca_{area}")
@@ -408,94 +643,217 @@ def pagina_area(area: str):
         mask &= df_full["responsavel"] == resp_sel
     if regime_sel != "Todos":
         mask &= df_full["regime"] == regime_sel
-
     indices_visiveis = df_full[mask].index
 
-    # abas por trimestre para não sobrecarregar a tela
     tri_labels = ["Jan–Mar", "Abr–Jun", "Jul–Set", "Out–Dez"]
     tri_meses = [MESES[0:3], MESES[3:6], MESES[6:9], MESES[9:12]]
-    tabs = st.tabs(tri_labels + (["ECD / ECF"] if cfg["extras"] else []))
+    abas = tri_labels + (["ECD / ECF"] if cfg["periodos_extra"] else [])
+    tabs = st.tabs(abas)
 
     colunas_fixas = ["codigo", "cnpj", "razao_social", "regime", "responsavel"]
+    config_fixas = {
+        "codigo": st.column_config.TextColumn("Código", width="small", disabled=True),
+        "cnpj": st.column_config.TextColumn("CNPJ", width="medium", disabled=True),
+        "razao_social": st.column_config.TextColumn("Razão Social", width="large", disabled=True),
+        "regime": st.column_config.TextColumn("Regime", width="small", disabled=True),
+        "responsavel": st.column_config.TextColumn("Responsável", width="medium", disabled=True),
+    }
 
-    for tab, meses_tri in zip(tabs[:4], tri_meses):
+    for tab, meses_tri, label in zip(tabs[:4], tri_meses, tri_labels):
         with tab:
             colunas_mes = []
+            col_config = dict(config_fixas)
             for mes in meses_tri:
-                colunas_mes.append(f"{mes} · Status")
-                if cfg["tem_extratos"]:
-                    colunas_mes.append(f"{mes} · Extratos")
-            colunas_exibir = colunas_fixas + colunas_mes
-            col_config = {
-                "codigo": st.column_config.TextColumn("Código", width="small", disabled=True),
-                "cnpj": st.column_config.TextColumn("CNPJ", width="medium", disabled=True),
-                "razao_social": st.column_config.TextColumn("Razão Social", width="large", disabled=True),
-                "regime": st.column_config.TextColumn("Regime", width="small", disabled=True),
-                "responsavel": st.column_config.TextColumn("Responsável", width="medium", disabled=True),
-            }
-            for c in colunas_mes:
-                col_config[c] = st.column_config.SelectboxColumn(
-                    c, options=STATUS_OPTIONS, width="small"
+                colunas_mes += [f"{mes} · Status", f"{mes} · Link"]
+                col_config[f"{mes} · Status"] = st.column_config.SelectboxColumn(
+                    f"{mes} · Status", options=STATUS_OPTIONS, width="small"
                 )
-
+                col_config[f"{mes} · Link"] = st.column_config.TextColumn(
+                    f"{mes} · Link", width="medium"
+                )
+                if cfg["tem_extratos"]:
+                    colunas_mes += [f"{mes} · Extratos", f"{mes} · Link Extrato"]
+                    col_config[f"{mes} · Extratos"] = st.column_config.SelectboxColumn(
+                        f"{mes} · Extratos", options=STATUS_OPTIONS, width="small"
+                    )
+                    col_config[f"{mes} · Link Extrato"] = st.column_config.TextColumn(
+                        f"{mes} · Link Extrato", width="medium"
+                    )
+            colunas_exibir = colunas_fixas + colunas_mes
             editado = st.data_editor(
                 df_full.loc[indices_visiveis, colunas_exibir],
                 column_config=col_config,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 num_rows="fixed",
-                key=f"editor_{area}_{tri_labels[tri_meses.index(meses_tri)]}",
+                key=f"editor_{area}_{label}",
             )
-            for c in colunas_mes:
-                df_full.loc[editado.index, c] = editado[c]
+            if not editado.equals(df_full.loc[indices_visiveis, colunas_exibir]):
+                salvar_grid(area, editado, meses_tri)
+                st.toast(f"Alterações salvas no banco ({label}).", icon="💾")
 
-    if cfg["extras"]:
+    if cfg["periodos_extra"]:
         with tabs[-1]:
-            colunas_extra = [f"{e} · Status" for e in cfg["extras"]]
+            colunas_extra, col_config = [], dict(config_fixas)
+            for extra in cfg["periodos_extra"]:
+                colunas_extra += [f"{extra} · Status", f"{extra} · Link"]
+                col_config[f"{extra} · Status"] = st.column_config.SelectboxColumn(
+                    f"{extra} · Status", options=STATUS_OPTIONS, width="small"
+                )
+                col_config[f"{extra} · Link"] = st.column_config.TextColumn(
+                    f"{extra} · Link", width="medium"
+                )
             colunas_exibir = colunas_fixas + colunas_extra
-            col_config = {
-                "codigo": st.column_config.TextColumn("Código", width="small", disabled=True),
-                "cnpj": st.column_config.TextColumn("CNPJ", width="medium", disabled=True),
-                "razao_social": st.column_config.TextColumn("Razão Social", width="large", disabled=True),
-                "regime": st.column_config.TextColumn("Regime", width="small", disabled=True),
-                "responsavel": st.column_config.TextColumn("Responsável", width="medium", disabled=True),
-            }
-            for c in colunas_extra:
-                col_config[c] = st.column_config.SelectboxColumn(c, options=STATUS_OPTIONS, width="small")
             editado = st.data_editor(
                 df_full.loc[indices_visiveis, colunas_exibir],
                 column_config=col_config,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 num_rows="fixed",
                 key=f"editor_{area}_extra",
             )
-            for c in colunas_extra:
-                df_full.loc[editado.index, c] = editado[c]
+            if not editado.equals(df_full.loc[indices_visiveis, colunas_exibir]):
+                salvar_grid(area, editado, cfg["periodos_extra"])
+                st.toast("Alterações salvas no banco (ECD/ECF).", icon="💾")
 
-    st.session_state[chave] = df_full
-
-    # % conclusão
     st.markdown("### % Conclusão por empresa")
-    resultado = df_full.loc[indices_visiveis, ["razao_social", "responsavel"]].copy()
-    resultado["% Conclusão"] = (calcular_conclusao(df_full.loc[indices_visiveis]) * 100).round(1)
+    df_atual = carregar_grid(area)
+    resultado = df_atual.loc[indices_visiveis, ["razao_social", "responsavel"]].copy()
+    resultado["% Conclusão"] = (calcular_conclusao(area, df_atual.loc[indices_visiveis]) * 100).round(1)
     resultado = resultado.sort_values("% Conclusão")
     st.dataframe(
         resultado,
-        column_config={
-            "% Conclusão": st.column_config.ProgressColumn(
-                "% Conclusão", min_value=0, max_value=100, format="%.1f%%"
-            )
-        },
-        use_container_width=True,
-        hide_index=True,
+        column_config={"% Conclusão": st.column_config.ProgressColumn(
+            "% Conclusão", min_value=0, max_value=100, format="%.1f%%")},
+        width='stretch', hide_index=True,
     )
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# PÁGINA: PLACEHOLDERS (Relatórios / Declarações / Reembolso)
+# ──────────────────────────────────────────────────────────────────────────
+def pagina_placeholder(nome: str):
+    st.title(f"{nome} 2026")
+    st.markdown(f'<div class="placeholder-box">{PLACEHOLDERS[nome]}</div>', unsafe_allow_html=True)
+    st.caption("Aba criada como estrutura inicial, replicando o estado do arquivo original. "
+               "Me diga o formato desejado (colunas, regras) e eu monto a estrutura completa.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# PÁGINA: AGENDA
+# ──────────────────────────────────────────────────────────────────────────
+def pagina_agenda():
+    st.title("📅 Agenda 2026")
+    st.caption("Reuniões agendadas, saídas particulares e calendário do mês — gravado no SQLite.")
+
+    hoje = date.today()
+    col_a, col_b = st.columns(2)
+    with col_a:
+        ano = st.selectbox("Ano", [2026], index=0)
+    with col_b:
+        mes_nome = st.selectbox("Mês", MESES, index=min(hoje.month - 1, 11))
+    mes_num = MES_NUM[mes_nome]
+
+    reun = carregar_reunioes()
+    said = carregar_saidas()
+
+    def _no_mes(df, col="data"):
+        if df.empty:
+            return df
+        d = pd.to_datetime(df[col], errors="coerce")
+        return df[(d.dt.year == ano) & (d.dt.month == mes_num)]
+
+    reun_mes = _no_mes(reun)
+    said_mes = _no_mes(said)
+
+    st.markdown(f"### Cronograma — {mes_nome}/{ano}")
+    cal = pycalendar.Calendar(firstweekday=6)  # domingo primeiro
+    semanas = cal.monthdayscalendar(ano, mes_num)
+    dias_semana = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+    header_cols = st.columns(7)
+    for c, dia in zip(header_cols, dias_semana):
+        c.markdown(f"**{dia}**")
+    for semana in semanas:
+        cols = st.columns(7)
+        for c, dia in zip(cols, semana):
+            if dia == 0:
+                c.markdown("&nbsp;", unsafe_allow_html=True)
+                continue
+            data_str = f"{ano}-{mes_num:02d}-{dia:02d}"
+            eventos = []
+            if not reun_mes.empty:
+                for _, r in reun_mes[pd.to_datetime(reun_mes["data"]).dt.day == dia].iterrows():
+                    eventos.append(f"🗓️ {r['horario'] or ''} {r['titulo']}")
+            if not said_mes.empty:
+                for _, s in said_mes[pd.to_datetime(said_mes["data"]).dt.day == dia].iterrows():
+                    eventos.append(f"🚗 {s['motivo'] or 'Saída'}")
+            corpo = "<br>".join(eventos[:3]) if eventos else ""
+            c.markdown(
+                f'<div class="day-cell"><span class="day-num">{dia}</span><br>{corpo}</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.divider()
+    tab1, tab2 = st.tabs(["📅 Reuniões Agendadas", "🚗 Saídas Particulares"])
+
+    with tab1:
+        st.dataframe(reun, width='stretch', hide_index=True)
+        with st.expander("➕ Nova reunião"):
+            with st.form("form_reuniao", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                data_r = c1.date_input("Data", value=hoje)
+                horario_r = c2.time_input("Horário")
+                titulo_r = st.text_input("Título")
+                participantes_r = st.text_input("Participantes")
+                c3, c4 = st.columns(2)
+                local_r = c3.text_input("Local")
+                teams_r = c4.selectbox("Teams?", ["Não", "Sim"])
+                obs_r = st.text_area("Observações")
+                if st.form_submit_button("Salvar reunião"):
+                    adicionar_reuniao(str(data_r), str(horario_r), titulo_r,
+                                       participantes_r, local_r, teams_r, obs_r)
+                    st.success("Reunião adicionada.")
+                    st.rerun()
+        if not reun.empty:
+            with st.expander("🗑️ Excluir reunião"):
+                id_del = st.selectbox("Selecione o ID", reun["id"].tolist(), key="del_reuniao")
+                if st.button("Excluir", key="btn_del_reuniao"):
+                    excluir_registro("reunioes", int(id_del))
+                    st.rerun()
+
+    with tab2:
+        st.dataframe(said, width='stretch', hide_index=True)
+        with st.expander("➕ Nova saída"):
+            with st.form("form_saida", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                data_s = c1.date_input("Data", value=hoje, key="data_saida")
+                saida_s = c2.time_input("Horário de saída")
+                c3, c4 = st.columns(2)
+                retorno_s = c3.text_input("Retorno previsto")
+                responsavel_s = c4.text_input("Responsável")
+                motivo_s = st.text_input("Motivo")
+                obs_s = st.text_area("Observações", key="obs_saida")
+                if st.form_submit_button("Salvar saída"):
+                    adicionar_saida(str(data_s), str(saida_s), retorno_s,
+                                     responsavel_s, motivo_s, obs_s)
+                    st.success("Saída adicionada.")
+                    st.rerun()
+        if not said.empty:
+            with st.expander("🗑️ Excluir saída"):
+                id_del = st.selectbox("Selecione o ID", said["id"].tolist(), key="del_saida")
+                if st.button("Excluir", key="btn_del_saida"):
+                    excluir_registro("saidas", int(id_del))
+                    st.rerun()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# PÁGINA: LISTA DE EMPRESAS
+# ──────────────────────────────────────────────────────────────────────────
 def pagina_lista_empresas():
     st.title("🧑 Lista de Empresas")
-    st.caption("137 empresas ativas — tabela de cadastro (dimensão), relacionada às áreas de controle pelo CNPJ.")
-    df = st.session_state["empresas"]
+    st.caption("137 empresas ativas — tabela de cadastro (dimensão), relacionada às áreas pelo CNPJ. "
+               "Fonte: SQLite (`confiabil.db`).")
+    df = carregar_empresas()
 
     busca = st.text_input("🔎 Buscar por razão social, CNPJ ou responsável")
     if busca:
@@ -507,20 +865,48 @@ def pagina_lista_empresas():
         df = df[m]
 
     st.dataframe(
-        df.rename(
-            columns={
-                "codigo": "Código Domínio", "cnpj": "CNPJ", "razao_social": "Razão Social",
-                "municipio": "Município", "regime": "Regime Tributário", "atividade": "Atividade",
-                "responsavel": "Responsável", "contato": "Nome do Contato",
-                "telefone": "Telefone", "email": "E-mail",
-            }
-        ),
-        use_container_width=True,
-        hide_index=True,
-        height=560,
+        df.rename(columns={
+            "codigo": "Código Domínio", "cnpj": "CNPJ", "razao_social": "Razão Social",
+            "municipio": "Município", "regime": "Regime Tributário", "atividade": "Atividade",
+            "responsavel": "Responsável", "contato": "Nome do Contato",
+            "telefone": "Telefone", "email": "E-mail",
+        }),
+        width='stretch', hide_index=True, height=520,
     )
 
+    with st.expander("➕ Cadastrar nova empresa"):
+        with st.form("form_empresa", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            codigo = c1.text_input("Código Domínio")
+            cnpj = c2.text_input("CNPJ")
+            regime = c3.selectbox("Regime", ["SIMPLES", "PRESUMIDO", "REAL"])
+            razao = st.text_input("Razão Social")
+            c4, c5 = st.columns(2)
+            municipio = c4.text_input("Município")
+            atividade = c5.selectbox("Atividade", ["SERVIÇOS", "COMÉRCIO", "INDÚSTRIA"])
+            c6, c7 = st.columns(2)
+            responsavel = c6.text_input("Responsável")
+            contato = c7.text_input("Nome do Contato")
+            c8, c9 = st.columns(2)
+            telefone = c8.text_input("Telefone")
+            email = c9.text_input("E-mail")
+            if st.form_submit_button("Cadastrar"):
+                if codigo and cnpj and razao:
+                    adicionar_empresa({
+                        "codigo": codigo, "cnpj": cnpj, "razao_social": razao,
+                        "municipio": municipio, "regime": regime, "atividade": atividade,
+                        "responsavel": responsavel, "contato": contato,
+                        "telefone": telefone, "email": email,
+                    })
+                    st.success(f"Empresa {razao} cadastrada com sucesso.")
+                    st.rerun()
+                else:
+                    st.error("Preencha ao menos Código, CNPJ e Razão Social.")
 
+
+# ──────────────────────────────────────────────────────────────────────────
+# PÁGINA: LEGENDA
+# ──────────────────────────────────────────────────────────────────────────
 def pagina_legenda():
     st.title("ℹ️ Legenda e Instruções")
     st.markdown(
@@ -531,22 +917,25 @@ def pagina_legenda():
         | **CNPJ** | CNPJ completo, importado da Lista de Empresas. |
         | **Razão Social** | Nome da empresa. |
         | **Status** | Situação da entrega/obrigação no mês: `▲ Entregue`, `▼ Atrasado`, `● Pendente`, `○ N/A`. |
-        | **Extratos Recebidos** | Só na aba Contabilidade: indica se os extratos bancários do período já foram recebidos do cliente. |
-        | **ECD / ECF** | Só na aba Contabilidade: entregas anuais de Escrituração Contábil e Fiscal Digital. |
-        | **% Conclusão** | Calculada automaticamente: total de `▲ Entregue` dividido pelo total preenchido, excluindo `○ N/A`. |
+        | **Link** | Caminho ou URL do arquivo (rede, OneDrive, SharePoint, Google Drive). |
+        | **Extratos Recebidos** | Só na aba Contabilidade: se os extratos bancários do período já foram recebidos do cliente (mesmo dropdown de Status). |
+        | **ECD / ECF** | Só na aba Contabilidade: Escrituração Contábil Digital e Fiscal, entregas anuais (Status + Link, sem Extratos). |
+        | **% Conclusão** | `▲ Entregue` dividido pelo total preenchido (excluindo N/A). Na Contabilidade, soma Status **e** Extratos igualmente. |
         """
     )
     st.info(
-        "As alterações feitas nas grades de Status são mantidas durante a sessão. "
-        "Use o botão **Exportar tudo para Excel** no Painel para salvar um arquivo definitivo."
+        "Todos os dados são gravados em um banco **SQLite** local (`confiabil.db`), no mesmo "
+        "diretório do app — sobrevivem a reinícios. Use **Exportar tudo para Excel** no Painel "
+        "para gerar um arquivo `.xlsx` a qualquer momento."
     )
+
 
 
 # ──────────────────────────────────────────────────────────────────────────
 # APP
 # ──────────────────────────────────────────────────────────────────────────
 def main():
-    inicializar_estado()
+    init_db()
 
     with st.sidebar:
         st.markdown("## Confiábil")
@@ -556,7 +945,7 @@ def main():
         escolha = st.radio("Navegação", rotulos, label_visibility="collapsed")
         nome_pagina = escolha.split("  ", 1)[1]
         st.divider()
-        st.caption("Desenvolvido internamente · dados de exemplo baseados no arquivo original")
+        st.caption(f"Banco: `{os.path.basename(DB_PATH)}`")
 
     if nome_pagina == "Painel":
         pagina_painel()
@@ -564,6 +953,10 @@ def main():
         pagina_lista_empresas()
     elif nome_pagina == "Legenda":
         pagina_legenda()
+    elif nome_pagina == "Agenda":
+        pagina_agenda()
+    elif nome_pagina in PLACEHOLDERS:
+        pagina_placeholder(nome_pagina)
     elif nome_pagina in AREAS:
         pagina_area(nome_pagina)
 
